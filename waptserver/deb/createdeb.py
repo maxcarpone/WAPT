@@ -39,18 +39,6 @@ from git import Repo
 
 makepath = os.path.join
 from shutil import copyfile
-
-
-"""
-required pip instal 
-
-apt-get install python-virtualenv python-setuptools python-pip python-dev libpq-dev libffi-dev libldap2-dev libsasl2-dev
-python2 -m pip install gitpython python-apt virtualenv setuptools 
-
-
-"""
-
-
 start_time = time.time()
 def run(*args, **kwargs):
     return subprocess.check_output(*args, shell=True, **kwargs)
@@ -274,19 +262,42 @@ if WAPTEDITION=='enterprise':
 
 open(os.path.join('./builddir/opt/wapt/waptserver','VERSION'),'w').write(full_version)
 
-# for some reason the virtualenv does not build itself right if we don't
-# have pip systemwide...
 
-eprint('Time before virtualenv : %f\n' % (time.time()-start_time))
+eprint('Time before Python 2 runtime : %f\n' % (time.time()-start_time))
 
-eprint('Create a build environment virtualenv. May need to download a few libraries, it may take some time')
-run_verbose(r'python2 -m virtualenv ./builddir/opt/wapt --always-copy')
+eprint('Using the reproducible WAPT Python 2 runtime')
 
-eprint('Install additional libraries in build environment virtualenv')
+runtime_dir = os.path.abspath(
+    os.path.join(wapt_source_dir, 'build', 'python2-runtime-server')
+)
 
-run('./builddir/opt/wapt/bin/pip install -r ../../requirements-server.txt -t ./builddir/opt/wapt/lib/python2.7/site-packages')
+runtime_python = os.path.join(runtime_dir, 'bin', 'python')
 
-eprint('Time after virtualenv : %f\n' % (time.time()-start_time))
+if not os.path.isfile(runtime_python):
+    eprint('ERROR: WAPT Python 2 runtime not found:')
+    eprint(runtime_dir)
+    eprint('Build it first with:')
+    eprint('./tools/build-python2-runtime-debian12.sh')
+    sys.exit(1)
+
+eprint('Runtime source: %s' % runtime_dir)
+
+eprint('Copying Python 2 runtime into package')
+
+run_verbose(
+    'cp -a "%s/." "./builddir/opt/wapt/"' % runtime_dir
+)
+
+eprint('Checking packaged Python runtime')
+
+runtime_version = subprocess.check_output(
+    '"%s" --version 2>&1' % runtime_python,
+    shell=True
+)
+
+eprint(runtime_version)
+
+eprint('Time after Python 2 runtime : %f\n' % (time.time()-start_time))
 
 eprint('copying the waptrepo files')
 copyfile(makepath(wapt_source_dir, 'waptcrypto.py'),'./builddir/opt/wapt/waptcrypto.py')
