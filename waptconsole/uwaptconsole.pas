@@ -1229,8 +1229,8 @@ uses LCLIntf, LCLType, IniFiles, variants, LazFileUtils,FileUtil, base64,
   {$IFDEF WINDOWS}windirs,winutils,{$ENDIF}
   uWaptPythonUtils
   {$ifdef ENTERPRISE}
-  ,uVisWUAGroup,uviswuadownloads,uvissoftwaresnormalization,uvisselfservicegroup,
-  uviseditcreaterule,uvissyncchangelog, uVisErrorsRepos, uviswaptusers
+  ,
+  uviseditcreaterule,uvissyncchangelog, uVisErrorsRepos
   {$endif}
   {$ifdef wsus},uVisWAPTWUAProducts, uviswuapackageselect,
   uVisWUAClassificationsSelect

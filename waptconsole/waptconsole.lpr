@@ -19,9 +19,9 @@ uses
   uvisloading, uviswaptconfig, uvischangepassword, uvistriggerhostsaction,
   uVisAPropos, uVisImportPackage, uwaptconsoleres, uVisPackageWizard,
   uVisChangeKeyPassword, uvisrepositories, uvisdisplaypreferences,
-  uVisHostDelete, waptcommon, tiscommon, uviswuadownloads,
-  uvissoftwaresnormalization, uvisselfservicegroup, uviseditcreaterule,
-  uVisErrorsRepos, uviswaptusers;
+  uVisHostDelete, waptcommon, tiscommon,
+  uviseditcreaterule,
+  uVisErrorsRepos;
 
 {$R *.res}
 
