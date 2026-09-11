@@ -16,9 +16,9 @@ uses
 
 begin
   if DirectoryIsWritable(Makepath([ExtractFilePath(ParamStr(0)),'log'])) then
-    exceptionLogger.LogFileName := Makepath([ExtractFilePath(ParamStr(0)),'log',ExtractFileNameWithoutExt(ExtractFileNameOnly(ParamStr(0)))+'.log'])
+    exceptionLogger.LogFileName := Makepath([ExtractFilePath(ParamStr(0)),'log',ExtractFileNameOnly(ParamStr(0))+'.log'])
   else
-    exceptionLogger.LogFileName := MakePath([GetUserDir,ExtractFileNameWithoutExt(ExtractFileNameOnly(ParamStr(0)))+'.log']);
+    exceptionLogger.LogFileName := MakePath([GetUserDir,ExtractFileNameOnly(ParamStr(0))+'.log']);
 
   Application.Scaled:=True;
   RequireDerivedFormResource := True;
