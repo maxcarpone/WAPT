@@ -39,7 +39,7 @@
 	url = https://waptgit.ad.tranquil.it/waptdev/pltis_superobject.git
 [submodule "submodules/pltis_sogrid"]
 	path = submodules/pltis_sogrid
-	url = https://waptgit.ad.tranquil.it/waptdev/pltis_sogrid.git
+	url = https://github.com/maxcarpone/pltis_sogrid.git
 [submodule "submodules/pltis_virtualtrees"]
 	path = submodules/pltis_virtualtrees
 	url = https://waptgit.ad.tranquil.it/waptdev/pltis_virtualtrees.git
