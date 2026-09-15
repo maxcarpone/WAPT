@@ -1,13 +1,14 @@
 # WAPT 1.8.2 Modernization — Technical Checkpoint
 
-**Checkpoint date:** 2026-09-14  
-**Purpose:** authoritative save-state for resuming the project in a fresh ChatGPT thread without replaying the full historical conversation.
+**Checkpoint date:** 2026-09-15  
+**Purpose:** authoritative save-state for resuming the WAPT Community modernization project without replaying the historical conversation.
 
 ## 1. Project objective
 
 Modernize the WAPT 1.8.2 Community codebase while preserving compatibility with existing deployments and a reproducible migration path.
 
 Production context:
+
 - 9 existing WAPT servers.
 - Historical production OS: Debian 10.13 Buster.
 - Historical production WAPT: 1.8.2.7393.
@@ -15,193 +16,219 @@ Production context:
 - Community edition is the target; Enterprise is not.
 
 Target migration concept:
-1. Debian 10 / WAPT 7393.
-2. Debian 10 / new autonomous Python-2-compatible build.
-3. Debian 11.
-4. Debian 12 current transitional package/runtime.
-5. Later Debian 13 / Python 3 modernization.
 
-## 2. Main WAPT repository
+1.  Debian 10 / WAPT 7393.
+2.  Debian 10 / autonomous rebuilt Python-2-compatible WAPT.
+3.  Debian 11.
+4.  Debian 12 transitional runtime/package.
+5.  Later Debian 13 / Python 3 modernization.
+
+## 2. Main WAPT repository — authoritative state
 
 Repository:
-```text
+
+``` text
 https://github.com/maxcarpone/WAPT
 ```
 
-Working tree:
-```text
+Windows working tree:
+
+``` text
 C:\git\waptdev
 ```
 
-Current branch:
-```text
+Branch:
+
+``` text
 branch-1.8.2
 ```
 
-Current authoritative HEAD:
-```text
-0ea123e0bc2d8b6d406806b52827748a8f6720e7
+Authoritative HEAD before this checkpoint commit:
+
+``` text
+895cb7597 Fix read-only SoGrid data loading
 ```
 
-Latest commit:
-```text
-0ea123e0b Use WAPT-compatible SoGrid fork
+Natural Git commit count:
+
+``` text
+7402
 ```
 
-Remote state:
-```text
-origin/branch-1.8.2 == 0ea123e0bc2d8b6d406806b52827748a8f6720e7
+Remote before publishing this checkpoint is still:
+
+``` text
+origin/branch-1.8.2 = 2ea908bf6 Add WAPT technical checkpoint
+```
+
+Therefore the following validated technical commits still need to be pushed with the checkpoint:
+
+``` text
+532404ef0 Fix VC90 CRT manifest for 9.0.30729.6161
+06f71f280 Update SoGrid Lazarus 1.8 dependencies
+895cb7597 Fix read-only SoGrid data loading
 ```
 
 Historical reference commits:
-```text
+
+``` text
 75a5de09  historical build 7393
 566bcad8  historical build 7394
 4bbf306a  historical build 7395
-74bfc5ef6 previous Windows/Lazarus compatibility milestone
-0ea123e0b current checkpoint
+3882380da Fix Community waptconsole build without Enterprise units
+74bfc5ef6 Fix waptexit build with Lazarus 1.8.2
+0ea123e0b Use WAPT-compatible SoGrid fork
+2ea908bf6 Add WAPT technical checkpoint
+532404ef0 VC90 CRT manifest fix / natural build 7400
+06f71f280 SoGrid Lazarus package dependency fix / natural build 7401
+895cb7597 read-only SoGrid fix / natural build 7402
 ```
 
-Build-number warning: current console has shown 1.8.2.7400 after later Git commits, while the validated Debian Buster server package is 7397. Final build-number policy is not yet normalized.
+### Build-number mechanism — RESOLVED
+
+The historical mechanism was traced through `create_version_full.py`, `lazbuild.py` and `waptdevutils.py`.
+
+Rule:
+
+``` text
+WAPT build number = number of Git commits reachable from the commit being built
+```
+
+Historical verification:
+
+``` text
+7393 commit -> count 7393
+7394 commit -> count 7394
+7395 commit -> count 7395
+895cb7597 -> count 7402
+```
+
+Current release version:
+
+``` text
+1.8.2.7402
+```
+
+Do not force arbitrary build numbers. Finalize source first, then let the historical Git-count mechanism determine the build number.
+
+A future real 1.8.3/1.9 release requires changing the canonical semantic version (`__version__`); the fourth component remains the Git commit count and does not reset.
 
 ## 3. Current Git working tree state
 
-At checkpoint time:
-```text
- M Microsoft.VC90.CRT.manifest
+After restoring Lazarus-generated `.lpi`, `.ico` and `waptconsole.sha256` side effects:
+
+``` text
  M submodules/pltis_synapse
- M wapt-get/WaptGuiHelper.lpi
- M wapt-get/waptget.ico
- M wapt-get/waptget.lpi
- M wapt-get/waptguihelper.ico
- M waptconsole.sha256
- M waptconsole/waptconsole.ico
- M waptconsole/waptconsole.lpi
- M waptdeploy/waptdeploy.ico
- M waptdeploy/waptdeploy.lpi
- M waptexit/waptexit.ico
- M waptexit/waptexit.lpi
- M waptmessage/waptmessage.ico
- M waptmessage/waptmessage.lpi
- M waptself/waptself.lpi
- M waptsetup/waptsetuputil/waptsetuputil.ico
- M waptsetup/waptsetuputil/waptsetuputil.lpi
- M wapttray/wapttray.ico
- M wapttray/wapttray.lpi
-?? version-full
-?? wapt-lab-codesign.cer
-?? wapt-lab-codesign.pfx
-?? waptmessage.exe
-?? waptmessage/lib/
-?? waptself.exe
 ```
 
-**Do not run `git add .`.** Many `.lpi`, `.ico`, hashes and binaries are build-side effects and must be reviewed individually. The lab signing certificate/private key are diagnostic artifacts only and must never be committed.
+This is the expected state.
 
-## 4. SoGrid reconstruction — authoritative state
+`pltis_synapse` is intentionally checked out at a public commit different from the parent repository's historical/private gitlink. Do not “fix” or commit it accidentally.
 
-The original parent repository referenced inaccessible/private SoGrid commit:
-```text
-d9766d181662fd59781a000997f19aeffcc3e0c2
-```
+Submodule snapshot before checkpoint:
 
-Public Tranquil IT SoGrid lacked API/properties expected by WAPT 1.8.2 forms and Pascal code, so compatibility was reconstructed from WAPT usage.
-
-Fork:
-```text
-https://github.com/maxcarpone/pltis_sogrid
-```
-
-Compatibility branch:
-```text
-wapt-1.8.2-compat
-```
-
-Authoritative SoGrid commit:
-```text
-68f6e98a63ce9db1769053ed5cbdef7e5d51509e
-```
-
-Commit message:
-```text
-Restore WAPT compatibility in SoGrid
-```
-
-Parent WAPT now records that gitlink and `.gitmodules` points SoGrid to the fork above.
-
-Current submodule status snapshot:
-```text
--68f6e98a63ce9db1769053ed5cbdef7e5d51509e submodules/pltis_sogrid
+``` text
+-540d1814813f2cd5a2445910989f50cfaf1a9228 submodules/pltis_sogrid
 +14589d4b7b5886242552021e5a1a637b1ea4c82f submodules/pltis_synapse (heads/master)
 ```
 
-Interpretation:
-- SoGrid gitlink is correct in the parent, but the working copy is not currently initialized through normal `git submodule` metadata (`-` prefix).
-- Synapse is checked out at a public commit different from the parent's inaccessible/private expected gitlink (`+` prefix).
-- Do not “fix” either automatically.
+The `-` on SoGrid means it is not initialized through normal submodule metadata in that checkout; the parent gitlink itself is correct.
 
-### Reconstructed SoGrid compatibility changes
+Never use:
 
-`source/sogrid.pas` includes:
-1. `TDynStringArray` -> `TStringArray` in `TSOConnection.LoadData`.
-2. Local `Offset` -> `LOffset` in `TSOStringEditLink.SetBounds`.
-3. Public `procedure DeleteRows(SOArray: ISuperObject);` plus implementation.
-4. `TSOGridNodesEvent` + published `OnNodesDelete`.
-5. Published `KeyFieldsNames: String` as persistent storage.
-6. `TSOGridSOCompareNodesEvent` + published `OnSOCompareNodes`.
-7. `TSOGridBeforePasteEvent` + published `OnBeforePaste`.
-8. `DoCompare` invokes `FOnSOCompareNodes`, passing property names split on `;`.
-9. `DoDeleteRows` invokes `FOnNodesDelete(Self, todelete)`.
-10. `DoPaste` lets `OnBeforePaste` veto each row.
-
-Important limitation: this behavior was reconstructed from WAPT source/forms and runtime tests. It is not claimed to be identical to the inaccessible private historical SoGrid source. In particular, `DeleteRows`, `KeyFieldsNames`, and `OnSOCompareNodes` deserve continued functional testing.
-
-### Encoding/EOL validation
-
-An intermediate edit introduced a BOM and mojibake; it was discarded. Final committed source before commit was validated as:
-```text
-BOM  = False
-CRLF = 4048
-LF   = 0
-git diff --check = clean
+``` text
+git add .
 ```
 
-Avoid PowerShell `Set-Content` for these legacy Pascal files.
+## 4. SoGrid — FINAL 7402 STATE
+
+Fork:
+
+``` text
+https://github.com/maxcarpone/pltis_sogrid
+```
+
+Branch:
+
+``` text
+wapt-1.8.2-compat
+```
+
+Compatibility reconstruction:
+
+``` text
+68f6e98a63ce9db1769053ed5cbdef7e5d51509e
+```
+
+Lazarus package dependency fix:
+
+``` text
+e2fa563...
+```
+
+Final read-only LoadData fix:
+
+``` text
+540d1814813f2cd5a2445910989f50cfaf1a9228
+Fix loading read-only SoGrid data
+```
+
+Parent WAPT commit recording the final SoGrid gitlink:
+
+``` text
+895cb7597 Fix read-only SoGrid data loading
+```
+
+### Root cause and final fix
+
+WAPTConsole's Edit Machine dialog showed an empty `Paquets disponibles` grid even though Python package search returned the expected package.
+
+`uviseditpackage.GridPackages` uses `toReadOnly`. VirtualTrees' `SetChildCount` is a no-op while `toReadOnly` is set. The final fix in `TSOGrid.LoadData` temporarily removes `toReadOnly` while clearing/loading `RootNodeCount`, then restores it before focus restoration.
+
+The nil-data branch similarly removes/re-adds `toReadOnly` around `Clear`.
+
+Runtime validation in the real WAPTConsole confirmed that `deb10-waptupgrade` is visibly displayed in the available-packages grid.
+
+### Historical confirmation
+
+The original developers restored missing history in the official SoGrid repository. The exact historical commit was recovered:
+
+``` text
+3dfe40c453350c9db1eb025c9b9db9402552092a
+Fix loading data in grid when toReadOnly is set Prevent duplicated rows when KeyFieldsNames is set
+```
+
+It is reachable from official `origin/master`.
+
+The historical `LoadData` implementation uses the same temporary `toReadOnly` removal/restoration mechanism independently reconstructed for 7402.
+
+Do not cherry-pick the whole historical commit: it also changes `AddRows`, `NodesForKey`, `Clear`, etc., while the reconstructed branch contains later/different API changes. The final 7402 LoadData patch is runtime validated and historically confirmed.
+
+**Freeze SoGrid for 7402.** Do not rework its history before final release validation. A later cleanup/rebase against restored official history is optional.
+
+### Encoding/EOL
+
+The working `sogrid.pas` uses CRLF. Do not normalize the whole file and do not use PowerShell `Set-Content` on legacy Pascal files where encoding/EOL matter.
 
 ## 5. Other Lazarus submodules
 
-Known inaccessible/private expected gitlinks include:
+Synapse expected historical/private gitlink differs from the public checkout in use:
 
-Synapse expected by parent:
-```text
-0b230215d388520e48a6de3b0c7d40d0a274d9cc5
+``` text
+public checkout: 14589d4b7b5886242552021e5a1a637b1ea4c82f
 ```
 
-Public Synapse checkout in use:
-```text
-14589d4b7b5886242552021e5a1a637b1ea4c82f
-```
+The divergence is intentional. Do not commit it accidentally.
 
-Therefore parent reports `submodules/pltis_synapse` modified. Do not commit accidentally.
+LCL Extensions and Enterprise may appear uninitialized (`-` prefix). Enterprise is not part of this Community reconstruction.
 
-LCL Extensions historical/private gitlink noted as:
-```text
-dba578...
-```
-
-BGRA packages registered:
-```text
-C:\git\waptdev\submodules\pltis_bgracontrolsfx\bgracontrolsfx.lpk
-C:\git\waptdev\submodules\pltis_bgrabitmap\bgrabitmap\bgrabitmappack.lpk
-C:\git\waptdev\submodules\pltis_bgracontrols\bgracontrols.lpk
-```
-
-Do not fork every `pltis_*` blindly; fork only where necessary for reproducibility or patches.
+Do not fork every `pltis_*` dependency blindly; only make a dependency reproducible when needed.
 
 ## 6. Debian 12 transitional Python 2 runtime
 
 Reference host:
-```text
+
+``` text
 Debian GNU/Linux 12.15 (bookworm)
 Kernel 6.1.0-32-amd64
 amd64 / x86_64
@@ -211,19 +238,17 @@ Python 3.11.2
 OpenSSL 3.0.20
 ```
 
-Python 2.7.18 was built from source. Consolidated runtime:
-```text
+Python 2.7.18 was built from source.
+
+Consolidated runtime:
+
+``` text
 /git/waptdev/build/python2-runtime-server
 ```
 
-Earlier test runtimes:
-```text
-/opt/wapt-runtime-test
-/opt/wapt-runtime-dependency-test
-```
+Key validated legacy packages include:
 
-Key validated packages include:
-```text
+``` text
 cryptography==2.5
 pyOpenSSL==19.0.0
 asn1crypto==1.5.1
@@ -246,361 +271,654 @@ certifi==2021.10.8
 setproctitle==1.1.10
 ```
 
-Additional resolved dependencies: `requests`, `psutil`, `netifaces`.
+Additional resolved dependencies include `requests`, `psutil`, and `netifaces`.
 
 Known non-blocking absence:
-```text
+
+``` text
 lzma
 ```
 
 Validated:
+
 - Python 2 SSL works with OpenSSL 3.0.20.
 - `cryptography==2.5` works with the WAPT verification patch.
 - `pyOpenSSL==19.0.0` imports.
 - `waptcrypto` functional API loads.
-- CA / CSR / client cert / signing / verification test passed.
-- `waptserver` module imports.
+- CA / CSR / client certificate / signing / verification test passed.
+- `waptserver` imports.
 - final runtime report: `All WAPT runtime tests passed.`
 
 ## 7. Debian server package state
 
-Bookworm reference build branch/commit:
-```text
-build/debian12-bookworm
-5da9f66b
+Bookworm reference build:
+
+``` text
+branch: build/debian12-bookworm
+commit: 5da9f66b
 ```
 
-Buster reference build branch/commit:
-```text
-build/debian10-buster
-907d4e78
+Buster reference build:
+
+``` text
+branch: build/debian10-buster
+commit: 907d4e78
 ```
 
 Validated Buster package:
-```text
+
+``` text
 /git/waptdev/waptserver/deb/tis-waptserver-1.8.2.7397-907d4e78-debian-10-amd64.deb
 ```
 
 SHA256:
-```text
+
+``` text
 7445288003d062e7a8afa29d1b8395cdf0b3705b0bc526d49b3a17e214a37733
 ```
 
-Installed version:
-```text
-1.8.2.7397-907d4e78-debian-10-amd64
-```
+Installed runtime:
 
-Runtime:
-```text
+``` text
 /opt/wapt/bin/python -> Python 2.7.18
 ```
 
-## 8. Debian 10 lab server validation
+## 8. Debian 10 lab server
 
-Lab:
-```text
+``` text
 hostname: wapt-deb10
 FQDN: wapt-deb10.genevoix-signoret-vinci.fr.lan
 IP: 192.168.220.12/22
 gateway: 192.168.223.254
 ```
 
-Fresh initial state: Debian 10, Python 3.7.3, no system Python 2, no PostgreSQL, no WAPT.
+Installed:
 
-Installed Buster 7397 package + PostgreSQL 11 + nginx. Postconf:
-```text
-/opt/wapt/waptserver/scripts/postconf.sh
-```
-
-Lab registration mode selected: unauthenticated registration, WAPT 1.3 behavior.
+- rebuilt Buster WAPT server package;
+- PostgreSQL 11;
+- nginx.
 
 Validated:
-- waptserver active/enabled on localhost:8080;
+
+- WAPT server active/enabled on localhost:8080;
 - nginx on 80/443;
 - PostgreSQL 11 on localhost:5432;
-- role/database `wapt`;
-- portal HTTPS reachable.
+- WAPT role/database present;
+- HTTPS portal reachable;
+- unauthenticated registration mode selected (historical WAPT 1.3 behavior).
 
-Fresh DB marker discrepancy:
-```text
-Fresh 7397 portal: OK (1.8.2.0)
-Production 7393 historical screenshot: OK (1.8.2.1)
+Fresh DB marker discrepancy remains:
+
+``` text
+fresh lab: OK (1.8.2.0)
+historical production screenshot: OK (1.8.2.1)
 ```
 
-Investigation found fresh DB already contains `hostsyncstatus`; `init_db()` creates current schema but sets version from `__version__ = "1.8.2"`, which renders as 1.8.2.0. Decision: do not hand-edit DB now; fix code later.
+Do not hand-edit the DB marker. This is deferred server cleanup.
 
-## 9. Portal client download issue
+## 9. Portal agent publication — RESOLVED FOR LAB
 
-Fresh lab portal offered historical WAPTSetup 1.8.2.7388. Server serves local `wapt/waptsetup-tis.exe` if present, otherwise falls back to historical external WAPT release URL. Future requirement: publish our validated setup locally and remove reliance on the old external binary.
+The lab portal originally fell back to an old historical WAPT setup when no local setup was published.
+
+After the final Windows release work, downloading the agent through the normal web interface produced:
+
+``` text
+waptagent.exe
+FileVersion    1.8.2.7402
+ProductVersion 1.8.2.7402
+ProductName    WAPTAgent
+```
+
+This exact portal-delivered agent was used for the successful VM105 production-style migration test described below.
+
+For production, preserve the requirement that the server serves the locally validated setup/agent and does not depend on an obsolete external fallback.
 
 ## 10. Windows build workstation
 
-```text
+``` text
 Windows 11 25H2 AMD64
 Repo: C:\git\waptdev
-Git: C:\Program Files\Git\cmd\git.exe (2.55.0.windows.5)
-Python: C:\Python27 (2.7.18 x86)
+Git: 2.55.0.windows.5
+Python: C:\Python27\python.exe (2.7.18 x86)
 Build venv: C:\wapt-build-test
 Lazarus 1.8.2
-FPC 3.0.4
-Lazarus path: C:\lazarus
+FPC 3.0.4 i386-win32
+Lazarus: C:\lazarus
 Inno Setup 5.6.0
 ISCC: C:\git\binaries_cache\iscc\app\ISCC.exe
 ```
 
-Historical OpenSSL 1.0.2u i386 was recovered for Windows build requirements.
+Historical OpenSSL 1.0.2u i386 was recovered for Windows requirements.
 
-NSSM restored:
-```text
+NSSM restored under:
+
+``` text
 waptservice\win32\nssm.exe
 waptservice\win64\nssm.exe
 ```
 
-`ujson==1.35` built with VC9. WAPT crypto tests passed.
+`ujson==1.35` was built with VC9.
 
-## 11. Windows Lazarus build chain
+## 11. Windows Lazarus build chain — FINAL 7402
 
-Expected projects:
-1. `wapt-get\waptget.lpi`
-2. `wapt-get\waptguihelper.lpi`
-3. `waptdeploy\waptdeploy.lpi`
-4. `wapttray\wapttray.lpi`
-5. `waptconsole\waptconsole.lpi`
-6. `waptexit\waptexit.lpi`
-7. `waptself\waptself.lpi`
-8. `waptmessage\waptmessage.lpi`
-9. `waptsetup\waptsetuputil\waptsetuputil.lpi`
+Nine Lazarus projects/modules are part of the final build:
 
-All nine compiled successfully during reconstruction.
-
-`lazbuild.py -e community -v 1.8.2 -b <build>` rewrites product version/edition metadata. A test with `-b 7393` produced exact 1.8.2.7393 Community metadata. Direct lazbuild is useful for diagnostics, but wrapper builds should be used for final metadata.
-
-Relevant commits:
-```text
-3882380d Fix Community waptconsole build without Enterprise units
-74bfc5ef6 Fix waptexit build with Lazarus 1.8.2
+``` text
+wapt-get\waptget.lpi                         -> wapt-get.exe
+wapt-get\waptguihelper.lpi                   -> waptguihelper.pyd
+waptdeploy\waptdeploy.lpi                    -> waptdeploy.exe
+wapttray\wapttray.lpi                        -> wapttray.exe
+waptconsole\waptconsole.lpi                  -> waptconsole.exe
+waptexit\waptexit.lpi                        -> waptexit.exe
+waptself\waptself.lpi                        -> waptself.exe
+waptmessage\waptmessage.lpi                  -> waptmessage.exe
+waptsetup\waptsetuputil\waptsetuputil.lpi   -> waptsetuputil.dll
 ```
 
-`waptexit` compatibility fix replaced unsupported `ExtractFileNameWithoutExt(ExtractFileNameOnly(ParamStr(0)))` with `ExtractFileNameOnly(ParamStr(0))`.
+All nine final artifacts were rebuilt with:
 
-## 12. VC90 runtime and Inno Setup
+``` text
+FileVersion    1.8.2.7402
+ProductVersion 1.8.2
+```
 
-Inno initially lacked:
-```text
-msvcm90.dll
-msvcp90.dll
+Important build behavior:
+
+- `lazbuild.py` must be invoked **one project at a time**.
+- Passing multiple project paths in one invocation returned silently without rebuilding them.
+- Use `C:\wapt-build-test\Scripts\python.exe .\lazbuild.py ...` because system `C:\Python27` lacks GitPython.
+- `waptself` once triggered an intermittent Lazarus `EAccessViolation` / exit 217; rerunning it alone immediately succeeded with no source changes. Treat this as a transient lazbuild crash unless reproduced.
+- `waptsetuputil` emits the known `WARNING: No compiler options`; final metadata/output are correct.
+
+Direct bare `lazbuild.exe` is useful for diagnostics, but final version metadata must be produced through the historical wrapper mechanism.
+
+## 12. VC90 CRT — RESOLVED
+
+The VC90 manifest was corrected to match the recovered QFE DLLs:
+
+``` text
+9.0.30729.6161
+```
+
+Files:
+
+``` text
 msvcr90.dll
+msvcp90.dll
+msvcm90.dll
 Microsoft.VC90.CRT.manifest
 ```
 
-The current Microsoft VC++ 2008 SP1 x86 wrapper EXE is version 9.0.30729.5677, but its `vc_red.cab` contains the required 9.0.30729.6161 payloads. Those were extracted to repo root.
+Committed in:
 
-Direct Inno build succeeded:
-```powershell
-& "C:\git\binaries_cache\iscc\app\ISCC.exe" .\waptsetup\waptsetup.iss
+``` text
+532404ef0 Fix VC90 CRT manifest for 9.0.30729.6161
 ```
 
-## 13. Windows setup candidate validated
+Do not blindly replace every other historical manifest reference to `9.0.21022.8`; only change a manifest when its actual payload requires it.
 
-Candidate:
-```text
-C:\git\waptdev\waptsetup\waptsetup.exe
-```
+## 13. Authenticode signing — FINAL 7402
 
-Metadata:
-```text
-FileVersion 1.8.2.7397
-ProductVersion 1.8.2
-ProductName WAPTSetup
-```
+Windows SDK SignTool:
 
-SHA256:
-```text
-34FE693005F94AA4192C7971B1860263F29DC8912CC642CF7DB9FD928285340A
-```
-
-Initially unsigned.
-
-## 14. Windows client lab validation
-
-Lab client:
-```text
-Windows 11 25H2
-IP 192.168.220.11
-```
-
-After removing an older WAPT installation, the candidate installed successfully under:
-```text
-C:\Program Files (x86)\wapt
-```
-
-Validated:
-```text
-wapt-get.exe --version -> Wrapper Win32.exe wapt-get 1.8.2.7397
-Python modules -> 1.8.2
-WAPTService -> Running, Automatic
-wapt-get update -> success
-wapt-get register -> success
-```
-
-Core Windows client/server communication works.
-
-## 15. waptconsole launch blocker and signing diagnosis
-
-Initial rebuilt `waptconsole.exe` failed on Windows 11 25H2 with:
-```text
-Une référence a été renvoyée par le serveur.
-```
-
-Manifest:
-```xml
-<requestedExecutionLevel level="asInvoker" uiAccess="true"/>
-```
-
-Rebuilt executable was unsigned; historical working consoles were signed. Decision: do not change `uiAccess`; restore signing.
-
-Windows SDK SignTool installed:
-```text
+``` text
 C:\Program Files (x86)\Windows Kits\10\bin\10.0.26100.0\x64\signtool.exe
 ```
 
-LAB certificate:
-```text
+Lab signing certificate:
+
+``` text
 Subject: CN=WAPT Lab Code Signing
 Thumbprint: D8B8C49EEB204125D7609365D4CF604E8B7056AC
 ```
 
-Lab files:
-```text
-C:\git\waptdev\wapt-lab-codesign.pfx
-C:\git\waptdev\wapt-lab-codesign.cer
+All nine final 7402 Lazarus artifacts were SHA-256 signed and verified successfully.
+
+No timestamp was used for the lab validation.
+
+The lab public certificate was trusted in LocalMachine Root + TrustedPublisher.
+
+Never commit:
+
+``` text
+wapt-lab-codesign.pfx
+wapt-lab-codesign.cer
 ```
 
-Never commit them.
+The PFX/private key is a local lab artifact only.
 
-After manual SHA-256 signing and trusting the lab cert in LocalMachine Root + TrustedPublisher, the launch blocker disappeared. Therefore signing is required for current `uiAccess=true` behavior. Production release must sign internal EXEs before packaging, then sign final setup.
+The `waptconsole.exe` manifest still contains:
 
-Historical `lazbuild.py` uses legacy signing syntax with `/t`. Future modernization should add `/fd SHA256` and preferably RFC3161 `/tr` + `/td SHA256`, subject to production certificate compatibility.
+``` xml
+<requestedExecutionLevel level="asInvoker" uiAccess="true"/>
+```
 
-## 16. Current waptconsole functional validation
+Do not remove `uiAccess=true` merely to bypass signing. The unsigned launch failure on Windows 11 25H2 was resolved by signing.
 
-After SoGrid reconstruction, rebuild and signing, console successfully:
+For a production release, use the production code-signing certificate and preferably modern RFC3161 timestamping if compatible with the deployment requirements.
+
+## 14. version-full — FINAL 7402
+
+Generated with:
+
+``` powershell
+C:\wapt-build-test\Scripts\python.exe .\create_version_full.py
+```
+
+Validated:
+
+``` text
+version-full = 1.8.2.7402
+git rev-list --count HEAD = 7402
+HEAD = 895cb7597 Fix read-only SoGrid data loading
+```
+
+`version-full` is a generated/local artifact and is excluded locally; do not commit it unless release policy is deliberately changed.
+
+## 15. Final WAPTSetup 7402
+
+Historical setup build mechanism recovered from PowerShell history:
+
+``` powershell
+& "C:\git\binaries_cache\iscc\app\ISCC.exe" .\waptsetup\waptsetup.iss
+```
+
+`create_setup_simple.py` was not used; attempts failed because of historical environment assumptions (`git.repo` / `active_directory`).
+
+Final installer:
+
+``` text
+C:\git\waptdev\waptsetup\waptsetup.exe
+```
+
+Metadata:
+
+``` text
+FileVersion    1.8.2.7402
+ProductVersion 1.8.2.7402
+ProductName    WAPTSetup
+```
+
+Final installer was signed with the lab Authenticode certificate and verified successfully.
+
+Final SHA256:
+
+``` text
+ADD5FC3F6D81E394FD821EAA3AC7A3D3543DA9438C2AA474FAAE2B95DD41083C
+```
+
+This hash is an important release checkpoint.
+
+## 16. WAPT package signing and waptupgrade numbering
+
+Do not confuse three independent layers:
+
+1.  Lazarus PE `FileVersion` / build metadata.
+2.  `version-full`.
+3.  WAPT package revision suffix after `-`.
+
+`waptdevutils.py::build_waptupgrade_package()` reads the actual `wapt-get.exe` FileVersion, obtains the latest existing package revision, then increments it with `entry.inc_build()`.
+
+Therefore the suffix is a **package release counter**, not the WAPT Git build number.
+
+Final package:
+
+``` text
+deb10-waptupgrade 1.8.2.7402-49
+```
+
+Intermediate packages encountered during validation:
+
+``` text
+1.8.2.7401-46  historical/intermediate
+1.8.2.7401-47  prior valid
+1.8.2.7401-48  intermediate generated from installed 7401 console
+1.8.2.7402-49  FINAL
+```
+
+Do not force the final suffix back to a lower number.
+
+Final server file:
+
+``` text
+/var/www/wapt/deb10-waptupgrade_1.8.2.7402-49_all_1d9f09b71bd4a0f075b1bb1b7ba1cf2a.wapt
+```
+
+Recorded size:
+
+``` text
+27771279 bytes
+```
+
+MD5:
+
+``` text
+1d9f09b71bd4a0f075b1bb1b7ba1cf2a
+```
+
+Package metadata:
+
+``` text
+package: deb10-waptupgrade
+version: 1.8.2.7402-49
+architecture: all
+section: base
+priority: critical
+target_os: windows
+min_wapt_version: 1.7
+signer: wapt-deb10-cert
+signer_fingerprint: 13388c40c2ede5c347b4455e5fb394bf2292e8c39fcb68545a6ab273122e3c11
+```
+
+Physical package presence and repository metadata were validated. Do not reopen “package/index missing” without contradictory evidence.
+
+### WAPT signer vs Authenticode signer
+
+These are separate trust systems:
+
+- Authenticode signs Windows PE files.
+- WAPT package signing uses the WAPT personal certificate/private key.
+- Trusted WAPT package signer certificates live in the WAPT `ssl` trust root.
+- `ssl\server` is HTTPS trust and is separate.
+
+Current WAPT signer:
+
+``` text
+CN: wapt-deb10-cert
+fingerprint: 13388c40c2ede5c347b4455e5fb394bf2292e8c39fcb68545a6ab273122e3c11
+```
+
+## 17. WAPTConsole functional validation — FINAL 7402
+
+The final signed Community console:
+
 - launches on Windows 11 25H2;
-- displays Community Edition;
-- authenticates to Debian 10 lab server;
-- opens main console;
-- generates a certificate;
-- generates a WAPT agent;
-- creates the update package;
-- uploads generated artifacts to main repository.
+- authenticates to the Debian 10 lab server;
+- displays hosts and package state;
+- generates certificates/agents;
+- creates and uploads waptupgrade packages;
+- correctly displays available packages in Edit Machine after the SoGrid fix;
+- can assign/save host dependencies;
+- can trigger package installation through the normal console workflow.
 
-Observed UI version:
-```text
-waptconsole Community Edition 1.8.2.7400
+Final console metadata:
+
+``` text
+FileVersion 1.8.2.7402
+ProductVersion 1.8.2
+Community Edition
 ```
 
-Agent-generation success message confirmed both agent and update package creation/upload.
+The SoGrid “Paquets disponibles” defect is considered resolved for 7402.
 
-This is a major functional milestone.
+## 18. Production-style Windows migration validation — PASS
 
-## 17. SoGrid serialized property inventory
+### Test machine
 
-Direct TSOGrid properties/events used by WAPT `.lfm` files include:
-```text
-Align, Alignment, Anchors, BorderStyle, ChangeDelay, Color, DragMode, DragType,
-Height, HintMode, Images, KeyFieldsNames, Left, OnBeforePaste, OnChange, OnClick,
-OnColumnDblClick, OnColumnResize, OnDblClick, OnDragAllowed, OnDragDrop, OnDragOver,
-OnDrawText, OnEdited, OnEditing, OnFocusChanged, OnGetHint, OnGetImageIndexEx,
-OnGetText, OnHeaderClick, OnHeaderDblClick, OnHeaderDragged, OnInitNode, OnKeyPress,
-OnMeasureItem, OnNewText, OnNodesDelete, OnPaintText, OnSOCompareNodes, PopupMenu,
-ShowAdvancedColumnsCustomize, TabOrder, Top, WantTabs, Width, ZebraPaint
+VM105:
+
+``` text
+hostname: vm105.genevoix-signoret-vinci.fr.lan
+UUID: 070A8580-54D0-4BD9-B3BA-49EE41C23D04
+IP: 192.168.220.5
 ```
 
-After reconstruction, all direct TSOGrid properties used by WAPT forms are represented.
+The VM was restored to an authentic production-connected WAPT 1.8.2.7393 snapshot before the final test.
 
-## 18. Known-good build commands
+Initial state:
 
-SoGrid package:
-```powershell
-cd C:\tmp\pltis_sogrid-wapt-clean
-& "C:\lazarus\lazbuild.exe" .\pltis_sogrid.lpk
+``` text
+Wrapper Win32.exe : wapt-get 1.8.2.7393
+WAPTService: Running
+repo_url=https://172.20.127.81/wapt
+wapt_server=https://172.20.127.81
 ```
 
-Direct diagnostic waptconsole rebuild:
-```powershell
+The stale VM105 server entry from earlier diagnostics was deleted from the lab WAPT console before the final test.
+
+### Real deployment path tested
+
+The agent was downloaded through the normal lab web interface:
+
+``` text
+waptagent.exe
+FileVersion    1.8.2.7402
+ProductVersion 1.8.2.7402
+ProductName    WAPTAgent
+```
+
+It was installed directly **over the authentic 7393 installation**, with no manual pre-edit of `wapt-get.ini` and no manual stop/register/update preparation.
+
+Result:
+
+- installation completed;
+- VM105 automatically returned to the WAPT console;
+- `wapt-get.exe --version` became 1.8.2.7402;
+- `WAPTService` was running;
+- the generated agent replaced the old production endpoints with the lab endpoints.
+
+Resulting configuration:
+
+``` ini
+[global]
+repo_url=https://wapt-deb10.genevoix-signoret-vinci.fr.lan/wapt
+send_usage_report=1
+use_hostpackages=1
+wapt_server=https://wapt-deb10.genevoix-signoret-vinci.fr.lan
+use_kerberos=0
+check_certificates_validity=1
+verify_cert=0
+use_repo_rules=0
+max_gpo_script_wait=180
+pre_shutdown_timeout=180
+hiberboot_enabled=0
+
+[wapt-templates]
+repo_url=https://store.wapt.fr/wapt
+verify_cert=1
+```
+
+### Host package / upgrade package validation
+
+The final host package dependency was assigned through WAPTConsole.
+
+Host package:
+
+``` text
+070A8580-54D0-4BD9-B3BA-49EE41C23D04
+version 3
+depends: deb10-waptupgrade
+signer: wapt-deb10-cert
+signer_fingerprint: 13388c40c2ede5c347b4455e5fb394bf2292e8c39fcb68545a6ab273122e3c11
+```
+
+WAPTConsole showed:
+
+``` text
+deb10-waptupgrade 1.8.2.7402-49
+```
+
+The normal console workflow installed it successfully. Final console state:
+
+- VM105: `OK`;
+- host package: installed/green;
+- `deb10-waptupgrade 1.8.2.7402-49`: installed/green;
+- audit task: Done;
+- host reachable.
+
+Final client checks:
+
+``` text
+wapt-get.exe --version -> 1.8.2.7402
+wapt-get.exe list-upgrade -> no pending upgrades
+```
+
+During the final package workflow `WAPTService` was observed temporarily `Stopped`, then returned to:
+
+``` text
+Running
+```
+
+without manual intervention.
+
+### Final verdict
+
+**PASS — production-style Windows migration from authentic WAPT 1.8.2.7393 to the rebuilt WAPT 1.8.2.7402 is validated.**
+
+Validated path:
+
+``` text
+authentic 7393 client
+    -> portal-delivered waptagent.exe 7402
+    -> install over existing WAPT
+    -> automatic registration on new server
+    -> host package assignment
+    -> deb10-waptupgrade 1.8.2.7402-49
+    -> final host OK / service Running / no pending upgrade
+```
+
+This is the preferred evidence for the real migration workflow.
+
+## 19. UnknownIssuer diagnostic episode — NON-BLOCKING / CLOSED
+
+During an earlier, more artificial VM105 test path, WAPT 7393 logged:
+
+``` text
+Error merging Packages from .../wapt-host into db:
+EWaptCertificateUnknownIssuer:
+None of certificates ("wapt-deb10-cert") are trusted.
+```
+
+Investigation established:
+
+- the host package was signed by `wapt-deb10-cert`;
+- its control fingerprint was the expected `13388c40...e3c11`;
+- `WAPT/certificate.crt` contained the same self-signed certificate;
+- the 7393 runtime's `authorized_certificates()` contained the same certificate/fingerprint;
+- the error originates in the certificate-chain validation path when the relevant `SSLCABundle` does not accept the pinned certificate;
+- `_update_db()` purges a repository before calling `repo.packages()`, but the exact rollback/disappearance chronology was not conclusively established.
+
+The final restored-VM production-style migration succeeded without requiring a code change for this episode.
+
+**Classification:** diagnostic artifact/non-blocking for the validated 7402 release path.
+
+Do not reopen this investigation unless the same failure is reproduced in the real deployment workflow.
+
+## 20. Known-good build/release commands and rules
+
+Build metadata:
+
+``` powershell
+C:\wapt-build-test\Scripts\python.exe .\create_version_full.py
+```
+
+Final Lazarus builds:
+
+- invoke `lazbuild.py` one project at a time;
+- use the build venv Python;
+- Community edition;
+- let the Git commit count supply the natural build number.
+
+Direct diagnostic console rebuild:
+
+``` powershell
 & "C:\lazarus\lazbuild.exe" `
   --primary-config-path="C:\Users\Maintenance\AppData\Local\lazarus" `
   -B `
   "C:\git\waptdev\waptconsole\waptconsole.lpi"
 ```
 
-Use `lazbuild.py` rather than bare lazbuild for final version metadata.
+Final setup:
 
-## 19. Dangerous / misleading operations
-
-Avoid:
-```text
-git add .
+``` powershell
+& "C:\git\binaries_cache\iscc\app\ISCC.exe" .\waptsetup\waptsetup.iss
 ```
 
-Avoid `Set-Content` on legacy Pascal/source files where encoding/EOL matter.
+Important rules:
 
-Lazarus rewrites `.lpi` files; do not assume those diffs are intentional.
+- no `git add .`;
+- restore Lazarus-generated `.lpi/.ico/hash` changes after build unless intentionally changed;
+- do not commit lab signing keys/certificates;
+- do not normalize legacy Pascal EOLs casually;
+- do not remove `uiAccess=true`;
+- do not change Synapse accidentally;
+- do not reinstall/change Indy without a concrete blocker;
+- do not treat all nine Lazarus outputs as EXEs: one is a PYD and one is a DLL;
+- do not force package/build numbers;
+- do not rebuild 7402 after adding a parent WAPT commit unless intentionally creating a new build number.
 
-`core.autocrlf` is intentionally false.
+## 21. Open work after the 7402 Windows milestone
 
-Do not commit lab signing keys/certs/passwords.
+The Windows 7402 Community build/release/migration chain is now validated. Do not continue treating it as the primary blocker.
 
-Do not remove `uiAccess=true` merely to bypass signing; signing already proved to solve the launch issue.
+Remaining work should focus on release preservation/reproducibility and the server migration path.
 
-## 20. Open work
+Priority areas:
 
-Highest priority: complete and normalize the Windows build/release chain.
+1.  **Preserve the 7402 release state**
 
-Tasks:
-1. decide authoritative build-number strategy;
-2. rebuild all nine internal executables with final metadata;
-3. sign all internal executables;
-4. build final installer;
-5. sign final installer;
-6. validate clean install and upgrade behavior;
-7. validate generated agent on a clean machine.
+    - commit this checkpoint only;
+    - push the three already-validated technical commits plus the checkpoint;
+    - preserve hashes, package metadata and build procedure;
+    - ensure private signing material remains outside Git.
 
-SoGrid tests still desirable:
-- deletion / `DeleteRows`;
-- `OnNodesDelete`;
-- sorting via `OnSOCompareNodes`;
-- paste filtering via `OnBeforePaste`;
-- row identity/focus potentially related to `KeyFieldsNames`.
+2.  **Server migration/release path**
 
-Submodules: make remaining inaccessible/private dependencies reproducible, especially Synapse and LCL Extensions. Do not fork every `pltis_*` blindly.
+    - decide/validate the exact production upgrade procedure for the 9 existing Debian 10 / WAPT 7393 servers;
+    - validate the rebuilt Debian 10 server package against a production-like upgrade, not only a fresh lab install;
+    - preserve rollback/backups and PostgreSQL migration procedure;
+    - later move through Debian 11 and Debian 12.
 
-Server later:
-- fix fresh DB version-marker behavior;
-- serve our own current WAPT setup locally;
-- remove fallback to historical external setup;
-- validate production migration path.
+3.  **Server cleanup**
 
-Python 3 remains deferred until the transitional WAPT 1.8.2 chain is stable.
+    - fresh DB version marker `1.8.2.0` vs historical `1.8.2.1`;
+    - make local setup/agent publication explicit and reproducible;
+    - remove dependency on obsolete external setup fallback where appropriate.
 
-## 21. Exact next action
+4.  **Build reproducibility**
 
-Resume Windows functional validation/release cleanup from:
-```text
-WAPT   0ea123e0bc2d8b6d406806b52827748a8f6720e7
-SoGrid 68f6e98a63ce9db1769053ed5cbdef7e5d51509e
+    - document/recreate Lazarus package setup and inaccessible/private submodule substitutions;
+    - keep Synapse divergence explicit;
+    - optionally clean SoGrid history against the now-restored official history, but **not as part of 7402**.
+
+5.  **Later modernization**
+
+    - Python 3 package/runtime migration remains deferred until the transitional WAPT 1.8.2 chain is stable across the server migration path.
+
+## 22. Exact next action
+
+The immediate action after creating this file is **release-state preservation**, not another rebuild.
+
+From:
+
+``` text
+WAPT HEAD before checkpoint: 895cb7597
+Natural build: 7402
+SoGrid: 540d1814813f2cd5a2445910989f50cfaf1a9228
+Final setup SHA256: ADD5FC3F6D81E394FD821EAA3AC7A3D3543DA9438C2AA474FAAE2B95DD41083C
+Final upgrade package: deb10-waptupgrade 1.8.2.7402-49
+Windows migration validation: PASS
 ```
 
-Do not reopen solved SoGrid reconstruction unless a contradiction appears.
+Next steps:
 
-Recommended immediate action: **test the freshly generated WAPT agent on a clean Windows client before freezing the final release build.**
+``` text
+1. Replace WAPT_CHECKPOINT.md with this checkpoint.
+2. Review `git diff -- WAPT_CHECKPOINT.md`.
+3. Stage only WAPT_CHECKPOINT.md.
+4. Commit the checkpoint.
+5. Push branch-1.8.2 so the validated technical commits and checkpoint are backed up remotely.
+6. Re-check remote HEAD and working tree; only intentional Synapse divergence should remain.
+7. Then begin the production-like Debian 10 server upgrade validation.
+```
 
-## 22. Resume protocol for a new ChatGPT thread
+Important build-number consequence: committing this checkpoint will make the branch Git commit count 7403. That **does not invalidate the already-built 7402 artifacts** because they are tied to source commit `895cb7597`. Do not rebuild them merely because the documentation checkpoint adds a later commit.
+
+## 23. Resume protocol for a new ChatGPT thread
 
 Attach this checkpoint and send:
 
-```text
+``` text
 Gipity, on reprend le projet WAPT 1.8.2 à partir du checkpoint joint.
 Considère WAPT_CHECKPOINT.md comme l'état technique faisant autorité.
 Ne recommence pas les investigations déjà validées sauf si une contradiction apparaît.
