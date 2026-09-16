@@ -501,6 +501,22 @@ print("WAPT CRYPTO TEST PASSED")
 PY
 
 ###############################################################################
+# Remove temporary WAPT server test configuration
+###############################################################################
+
+echo
+echo ">>> Removing temporary WAPT server test configuration"
+
+rm -f "${CONF_FILE}"
+rmdir "${CONF_DIR}" 2>/dev/null || true
+
+if [ -e "${CONF_FILE}" ]; then
+    echo "ERROR: temporary WAPT server configuration still present:"
+    echo "  ${CONF_FILE}"
+    exit 1
+fi
+
+###############################################################################
 # 18. Generate runtime inventory
 ###############################################################################
 

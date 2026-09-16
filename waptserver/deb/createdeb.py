@@ -268,7 +268,7 @@ eprint('Time before Python 2 runtime : %f\n' % (time.time()-start_time))
 eprint('Using the reproducible WAPT Python 2 runtime')
 
 runtime_dir = os.path.abspath(
-    os.path.join(wapt_source_dir, 'build', 'python2-runtime-server')
+    os.path.join(wapt_source_dir, 'build', 'python2-runtime-server-buster')
 )
 
 runtime_python = os.path.join(runtime_dir, 'bin', 'python')
@@ -277,10 +277,20 @@ if not os.path.isfile(runtime_python):
     eprint('ERROR: WAPT Python 2 runtime not found:')
     eprint(runtime_dir)
     eprint('Build it first with:')
-    eprint('./tools/build-python2-runtime-debian12.sh')
+    eprint('./tools/build-python2-runtime-buster.sh')
     sys.exit(1)
 
 eprint('Runtime source: %s' % runtime_dir)
+
+# A runtime must never contain persistent WAPT server configuration.
+# Shipping this file would overwrite the existing server configuration
+# during a Debian package upgrade.
+runtime_waptserver_ini = os.path.join(runtime_dir, 'conf', 'waptserver.ini')
+if os.path.exists(runtime_waptserver_ini):
+    eprint('ERROR: Python 2 runtime contains forbidden server configuration:')
+    eprint(runtime_waptserver_ini)
+    eprint('Refusing to build a package that could overwrite /opt/wapt/conf/waptserver.ini')
+    sys.exit(1)
 
 eprint('Copying Python 2 runtime into package')
 
