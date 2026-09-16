@@ -1,7 +1,7 @@
 #!/bin/bash
 set -u
 
-SCRIPT_VERSION="0.7"
+SCRIPT_VERSION="0.8"
 EXPECTED_DEBIAN_MAJOR="10"
 EXPECTED_WAPT_PREFIX="1.8.2.7393"
 SOURCE_BUILD="7393"
@@ -559,7 +559,7 @@ upgrade() {
     echo "====================================================="
     echo
 
-    echo "[1/3] Running source precheck..."
+    echo "[1/5] Running source precheck..."
     if ! precheck; then
         block "Upgrade aborted: source precheck failed"
         return 1
@@ -569,7 +569,7 @@ upgrade() {
     db_version_before="$DB_VERSION"
 
     echo
-    echo "[2/3] Looking for a valid backup..."
+    echo "[2/5] Looking for a valid backup..."
     if ! find_valid_backup; then
         block "Upgrade aborted: no valid backup found"
         return 1
@@ -577,7 +577,7 @@ upgrade() {
     ok "Valid backup: $VALID_BACKUP"
 
     echo
-    echo "[3/3] Validating target package..."
+    echo "[3/5] Validating target package..."
     if ! validate_target_package "$deb"; then
         block "Upgrade aborted: target package validation failed"
         return 1
@@ -590,10 +590,31 @@ upgrade() {
     echo "Target build: ${TARGET_BUILD}"
     echo "Backup: $VALID_BACKUP"
     echo "Package: $deb"
-    echo
-    echo "[SAFE] No system modification performed yet."
 
+    echo
+    echo "[4/5] Installing validated target package..."
+
+    if ! dpkg -i "$deb"; then
+        block "Upgrade failed during package installation"
+        return 1
+    fi
+
+    echo
+    echo "[5/5] Running post-upgrade checks..."
+
+    if ! postcheck_upgrade "$config_sha256_before" "$db_version_before"; then
+        block "Upgrade completed but post-upgrade checks failed"
+        echo "[RECOVERY] Verified backup: $VALID_BACKUP"
+        echo "[RECOVERY] Automatic rollback was NOT attempted"
+        return 1
+    fi
+
+    echo
+    echo "====================================================="
+    echo "UPGRADE RESULT: PASS"
+    echo "${SOURCE_BUILD} -> ${TARGET_BUILD}"
     return 0
+
 }
 
 usage() {
