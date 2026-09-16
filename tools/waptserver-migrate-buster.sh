@@ -1,7 +1,7 @@
 #!/bin/bash
 set -u
 
-SCRIPT_VERSION="0.6"
+SCRIPT_VERSION="0.7"
 EXPECTED_DEBIAN_MAJOR="10"
 EXPECTED_WAPT_PREFIX="1.8.2.7393"
 SOURCE_BUILD="7393"
@@ -464,8 +464,140 @@ find_valid_backup() {
     return 1
 }
 
+postcheck_upgrade() {
+    local expected_config_sha256="$1"
+    local expected_db_version="$2"
+    local failures=0
+    local installed_version
+    local config_sha256_after
+    local db_version_after
+
+    echo
+    echo "WAPT Server post-upgrade check"
+    echo "====================================================="
+
+    installed_version="$(dpkg-query -W -f='${Version}' "$TARGET_PACKAGE" 2>/dev/null || true)"
+
+    if [ "$installed_version" = "$TARGET_VERSION" ]; then
+        ok "Installed WAPT version: $installed_version"
+    else
+        block "Unexpected installed WAPT version: ${installed_version:-not installed}"
+        failures=$((failures + 1))
+    fi
+
+    if [ -f "$WAPT_CONFIG" ]; then
+        config_sha256_after="$(sha256sum "$WAPT_CONFIG" | awk '{print $1}')"
+        if [ "$config_sha256_after" = "$expected_config_sha256" ]; then
+            ok "WAPT configuration preserved"
+        else
+            block "WAPT configuration changed during upgrade"
+            failures=$((failures + 1))
+        fi
+    else
+        block "WAPT configuration missing after upgrade"
+        failures=$((failures + 1))
+    fi
+
+    for service in waptserver wapttasks nginx; do
+        if systemctl is-active --quiet "$service"; then
+            ok "Service $service active"
+        else
+            block "Service $service inactive"
+            failures=$((failures + 1))
+        fi
+    done
+
+    db_version_after="$(runuser -u postgres -- psql \
+        -p "$WAPT_DB_PORT" -d wapt -Atc \
+        "SELECT value FROM serverattribs WHERE key='db_version';" 2>/dev/null || true)"
+
+    if [ "$db_version_after" = "$expected_db_version" ]; then
+        ok "Database schema preserved: $db_version_after"
+    else
+        block "Database schema changed: ${db_version_after:-unavailable}"
+        failures=$((failures + 1))
+    fi
+
+    echo "Database post-upgrade baseline:"
+    for table in \
+        hostgroups \
+        hostpackagesstatus \
+        hosts \
+        hostsoftwares \
+        packages \
+        waptusers
+    do
+        local count_after
+
+        count_after="$(runuser -u postgres -- psql \
+            -p "$WAPT_DB_PORT" -d wapt -Atc \
+            "SELECT count(*) FROM ${table};" 2>/dev/null || true)"
+
+        if [ "$count_after" = "${DB_COUNTS[$table]}" ]; then
+            ok "${table}=${count_after}"
+        else
+            block "${table}: before=${DB_COUNTS[$table]} after=${count_after:-unavailable}"
+            failures=$((failures + 1))
+        fi
+    done
+
+    if [ "$failures" -eq 0 ]; then
+        echo "POST-UPGRADE RESULT: PASS"
+        return 0
+    fi
+
+    echo "POST-UPGRADE RESULT: BLOCKED ($failures issue(s))"
+    return 1
+}
+
+upgrade() {
+    local deb="$1"
+    local config_sha256_before
+    local db_version_before
+
+    echo "WAPT Server Buster migration upgrade v${SCRIPT_VERSION}"
+    echo "====================================================="
+    echo
+
+    echo "[1/3] Running source precheck..."
+    if ! precheck; then
+        block "Upgrade aborted: source precheck failed"
+        return 1
+    fi
+
+    config_sha256_before="$CONFIG_SHA256"
+    db_version_before="$DB_VERSION"
+
+    echo
+    echo "[2/3] Looking for a valid backup..."
+    if ! find_valid_backup; then
+        block "Upgrade aborted: no valid backup found"
+        return 1
+    fi
+    ok "Valid backup: $VALID_BACKUP"
+
+    echo
+    echo "[3/3] Validating target package..."
+    if ! validate_target_package "$deb"; then
+        block "Upgrade aborted: target package validation failed"
+        return 1
+    fi
+
+    echo
+    echo "====================================================="
+    echo "UPGRADE VALIDATION: PASS"
+    echo "Source build: ${SOURCE_BUILD}"
+    echo "Target build: ${TARGET_BUILD}"
+    echo "Backup: $VALID_BACKUP"
+    echo "Package: $deb"
+    echo
+    echo "[SAFE] No system modification performed yet."
+
+    return 0
+}
+
 usage() {
-    echo "Usage: $0 {precheck|backup|check-backup|check-package <deb>}"
+    echo "Usage: $0 {precheck|backup|check-backup|check-package <deb>|upgrade <deb>}"
 }
 
 case "${1:-precheck}" in
@@ -490,6 +622,14 @@ case "${1:-precheck}" in
             exit 2
         }
         validate_target_package "$2"
+        exit $?
+        ;;
+    upgrade)
+        [ -n "${2:-}" ] || {
+            echo "[BLOCK] Missing target package path"
+            exit 2
+        }
+        upgrade "$2"
         exit $?
         ;;
     *)
