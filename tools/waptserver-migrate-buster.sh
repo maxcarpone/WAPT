@@ -1,9 +1,35 @@
 #!/bin/bash
 set -u
 
-SCRIPT_VERSION="0.4"
+SCRIPT_VERSION="0.5"
 EXPECTED_DEBIAN_MAJOR="10"
 EXPECTED_WAPT_PREFIX="1.8.2.7393"
+SOURCE_BUILD="7393"
+
+# Validated target packages.
+# A target is authorized only when its package metadata AND SHA256 match.
+load_target() {
+    local build="$1"
+
+    case "$build" in
+        7398)
+            TARGET_BUILD="7398"
+            TARGET_PACKAGE="tis-waptserver"
+            TARGET_VERSION="1.8.2.7398-88170eee-debian-10-amd64"
+            TARGET_ARCH="amd64"
+            TARGET_SHA256="fb9406d37c50dfaaa3ee6aec417ac49f2b986730648bcfaf8c3c26be6266a823"
+            ;;
+        *)
+            echo "[BLOCK] Target build is not authorized: $build"
+            return 1
+            ;;
+    esac
+
+    return 0
+}
+
+TARGET_BUILD="${WAPT_TARGET_BUILD:-7398}"
+load_target "$TARGET_BUILD" || exit 1
 WAPT_CONFIG="/opt/wapt/conf/waptserver.ini"
 BACKUP_ROOT="/var/www/wapt-backups"
 
@@ -185,7 +211,7 @@ backup() {
 
     TIMESTAMP="$(date '+%Y%m%d-%H%M%S')"
     HOST="$(hostname)"
-    BACKUP_DIR="${BACKUP_ROOT}/migration-7393-7398-${TIMESTAMP}"
+    BACKUP_DIR="${BACKUP_ROOT}/migration-${SOURCE_BUILD}-${TARGET_BUILD}-${TIMESTAMP}"
     DB_DUMP="${BACKUP_DIR}/wapt-${HOST}.dump"
     CONFIG_ARCHIVE="${BACKUP_DIR}/wapt-config-${HOST}.tar.gz"
     MANIFEST="${BACKUP_DIR}/manifest.txt"
@@ -300,6 +326,12 @@ backup() {
         echo "os=${PRETTY_NAME:-unknown}"
         echo "kernel=$(uname -r)"
         echo "wapt_version=${WAPT_VERSION}"
+        echo "source_build=${SOURCE_BUILD}"
+        echo "target_build=${TARGET_BUILD}"
+        echo "target_package=${TARGET_PACKAGE}"
+        echo "target_version=${TARGET_VERSION}"
+        echo "target_arch=${TARGET_ARCH}"
+        echo "target_sha256=${TARGET_SHA256}"
         echo "wapt_python=${PYTHON_VERSION}"
         echo "config_path=${WAPT_CONFIG}"
         echo "config_sha256=${CONFIG_SHA256}"
