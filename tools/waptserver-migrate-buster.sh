@@ -1,7 +1,7 @@
 #!/bin/bash
 set -u
 
-SCRIPT_VERSION="0.5"
+SCRIPT_VERSION="0.6"
 EXPECTED_DEBIAN_MAJOR="10"
 EXPECTED_WAPT_PREFIX="1.8.2.7393"
 SOURCE_BUILD="7393"
@@ -382,8 +382,90 @@ backup() {
     echo "BACKUP RESULT: PASS"
 }
 
+validate_target_package() {
+    local deb="$1"
+    local actual_sha256
+    local actual_package
+    local actual_version
+    local actual_arch
+
+    [ -f "$deb" ] || {
+        block "Target package not found: $deb"
+        return 1
+    }
+
+    actual_sha256="$(sha256sum "$deb" | awk '{print $1}')"
+    actual_package="$(dpkg-deb -f "$deb" Package 2>/dev/null)"
+    actual_version="$(dpkg-deb -f "$deb" Version 2>/dev/null)"
+    actual_arch="$(dpkg-deb -f "$deb" Architecture 2>/dev/null)"
+
+    [ "$actual_package" = "$TARGET_PACKAGE" ] || {
+        block "Unexpected target package: $actual_package"
+        return 1
+    }
+
+    [ "$actual_version" = "$TARGET_VERSION" ] || {
+        block "Unexpected target version: $actual_version"
+        return 1
+    }
+
+    [ "$actual_arch" = "$TARGET_ARCH" ] || {
+        block "Unexpected target architecture: $actual_arch"
+        return 1
+    }
+
+    [ "$actual_sha256" = "$TARGET_SHA256" ] || {
+        block "Target package SHA256 mismatch"
+        return 1
+    }
+
+    ok "Target package validated: $(basename "$deb")"
+    return 0
+}
+
+find_valid_backup() {
+    local candidate
+    local manifest
+
+    VALID_BACKUP=""
+
+    while IFS= read -r candidate; do
+        manifest="${candidate}/manifest.txt"
+
+        [ -f "$manifest" ] || continue
+        [ -f "${candidate}/SHA256SUMS" ] || continue
+
+        grep -qx "script_version=0.5" "$manifest" || continue
+        grep -qx "hostname=$(hostname)" "$manifest" || continue
+        grep -qx "source_build=${SOURCE_BUILD}" "$manifest" || continue
+        grep -qx "target_build=${TARGET_BUILD}" "$manifest" || continue
+        grep -qx "target_package=${TARGET_PACKAGE}" "$manifest" || continue
+        grep -qx "target_version=${TARGET_VERSION}" "$manifest" || continue
+        grep -qx "target_arch=${TARGET_ARCH}" "$manifest" || continue
+        grep -qx "target_sha256=${TARGET_SHA256}" "$manifest" || continue
+
+        [ -f "$WAPT_CONFIG" ] || continue
+
+        local current_config_sha256
+        current_config_sha256="$(sha256sum "$WAPT_CONFIG" | awk '{print $1}')"
+
+        grep -qx "config_sha256=${current_config_sha256}" "$manifest" || continue
+
+        if (cd "$candidate" && sha256sum -c SHA256SUMS >/dev/null 2>&1); then
+            VALID_BACKUP="$candidate"
+            return 0
+        fi
+    done < <(
+        find "$BACKUP_ROOT" -maxdepth 1 -type d \
+            -name "migration-${SOURCE_BUILD}-${TARGET_BUILD}-*" \
+            -print 2>/dev/null | sort -r
+    )
+
+    return 1
+}
+
 usage() {
-    echo "Usage: $0 {precheck|backup}"
+    echo "Usage: $0 {precheck|backup|check-backup|check-package <deb>}"
 }
 
 case "${1:-precheck}" in
@@ -392,6 +474,23 @@ case "${1:-precheck}" in
         ;;
     backup)
         backup
+        ;;
+    check-backup)
+        if find_valid_backup; then
+            echo "[ OK ] Valid backup found: $VALID_BACKUP"
+            exit 0
+        else
+            echo "[BLOCK] No valid backup found"
+            exit 1
+        fi
+        ;;
+    check-package)
+        [ -n "${2:-}" ] || {
+            echo "[BLOCK] Missing target package path"
+            exit 2
+        }
+        validate_target_package "$2"
+        exit $?
         ;;
     *)
         usage
