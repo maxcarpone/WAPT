@@ -1,7 +1,8 @@
 #!/bin/bash
 set -u
 
-SCRIPT_VERSION="0.8"
+SCRIPT_VERSION="1.0"
+BACKUP_FORMAT_VERSION="1"
 EXPECTED_DEBIAN_MAJOR="10"
 EXPECTED_WAPT_PREFIX="1.8.2.7393"
 SOURCE_BUILD="7393"
@@ -321,6 +322,7 @@ backup() {
 
     {
         echo "script_version=${SCRIPT_VERSION}"
+        echo "backup_format_version=${BACKUP_FORMAT_VERSION}"
         echo "timestamp=${TIMESTAMP}"
         echo "hostname=${HOST}"
         echo "os=${PRETTY_NAME:-unknown}"
@@ -435,7 +437,7 @@ find_valid_backup() {
         [ -f "$manifest" ] || continue
         [ -f "${candidate}/SHA256SUMS" ] || continue
 
-        grep -qx "script_version=0.5" "$manifest" || continue
+        grep -qx "backup_format_version=${BACKUP_FORMAT_VERSION}" "$manifest" || continue
         grep -qx "hostname=$(hostname)" "$manifest" || continue
         grep -qx "source_build=${SOURCE_BUILD}" "$manifest" || continue
         grep -qx "target_build=${TARGET_BUILD}" "$manifest" || continue
