@@ -1,6 +1,6 @@
-# WAPT 1.8.2 Modernization — Technical Checkpoint
+# WAPT 1.8.2 Modernization â€” Technical Checkpoint
 
-**Checkpoint date:** 2026-09-15  
+**Checkpoint date:** 2026-09-17
 **Purpose:** authoritative save-state for resuming the WAPT Community modernization project without replaying the historical conversation.
 
 ## 1. Project objective
@@ -23,7 +23,7 @@ Target migration concept:
 4.  Debian 12 transitional runtime/package.
 5.  Later Debian 13 / Python 3 modernization.
 
-## 2. Main WAPT repository — authoritative state
+## 2. Main WAPT repository â€” authoritative state
 
 Repository:
 
@@ -84,7 +84,7 @@ Historical reference commits:
 895cb7597 read-only SoGrid fix / natural build 7402
 ```
 
-### Build-number mechanism — RESOLVED
+### Build-number mechanism â€” RESOLVED
 
 The historical mechanism was traced through `create_version_full.py`, `lazbuild.py` and `waptdevutils.py`.
 
@@ -123,7 +123,7 @@ After restoring Lazarus-generated `.lpi`, `.ico` and `waptconsole.sha256` side e
 
 This is the expected state.
 
-`pltis_synapse` is intentionally checked out at a public commit different from the parent repository's historical/private gitlink. Do not “fix” or commit it accidentally.
+`pltis_synapse` is intentionally checked out at a public commit different from the parent repository's historical/private gitlink. Do not â€œfixâ€ or commit it accidentally.
 
 Submodule snapshot before checkpoint:
 
@@ -140,7 +140,7 @@ Never use:
 git add .
 ```
 
-## 4. SoGrid — FINAL 7402 STATE
+## 4. SoGrid â€” FINAL 7402 STATE
 
 Fork:
 
@@ -356,7 +356,7 @@ historical production screenshot: OK (1.8.2.1)
 
 Do not hand-edit the DB marker. This is deferred server cleanup.
 
-## 9. Portal agent publication — RESOLVED FOR LAB
+## 9. Portal agent publication â€” RESOLVED FOR LAB
 
 The lab portal originally fell back to an old historical WAPT setup when no local setup was published.
 
@@ -399,7 +399,7 @@ waptservice\win64\nssm.exe
 
 `ujson==1.35` was built with VC9.
 
-## 11. Windows Lazarus build chain — FINAL 7402
+## 11. Windows Lazarus build chain â€” FINAL 7402
 
 Nine Lazarus projects/modules are part of the final build:
 
@@ -432,7 +432,7 @@ Important build behavior:
 
 Direct bare `lazbuild.exe` is useful for diagnostics, but final version metadata must be produced through the historical wrapper mechanism.
 
-## 12. VC90 CRT — RESOLVED
+## 12. VC90 CRT â€” RESOLVED
 
 The VC90 manifest was corrected to match the recovered QFE DLLs:
 
@@ -457,7 +457,7 @@ Committed in:
 
 Do not blindly replace every other historical manifest reference to `9.0.21022.8`; only change a manifest when its actual payload requires it.
 
-## 13. Authenticode signing — FINAL 7402
+## 13. Authenticode signing â€” FINAL 7402
 
 Windows SDK SignTool:
 
@@ -497,7 +497,7 @@ Do not remove `uiAccess=true` merely to bypass signing. The unsigned launch fail
 
 For a production release, use the production code-signing certificate and preferably modern RFC3161 timestamping if compatible with the deployment requirements.
 
-## 14. version-full — FINAL 7402
+## 14. version-full â€” FINAL 7402
 
 Generated with:
 
@@ -610,7 +610,7 @@ signer: wapt-deb10-cert
 signer_fingerprint: 13388c40c2ede5c347b4455e5fb394bf2292e8c39fcb68545a6ab273122e3c11
 ```
 
-Physical package presence and repository metadata were validated. Do not reopen “package/index missing” without contradictory evidence.
+Physical package presence and repository metadata were validated. Do not reopen â€œpackage/index missingâ€ without contradictory evidence.
 
 ### WAPT signer vs Authenticode signer
 
@@ -628,7 +628,7 @@ CN: wapt-deb10-cert
 fingerprint: 13388c40c2ede5c347b4455e5fb394bf2292e8c39fcb68545a6ab273122e3c11
 ```
 
-## 17. WAPTConsole functional validation — FINAL 7402
+## 17. WAPTConsole functional validation â€” FINAL 7402
 
 The final signed Community console:
 
@@ -649,9 +649,9 @@ ProductVersion 1.8.2
 Community Edition
 ```
 
-The SoGrid “Paquets disponibles” defect is considered resolved for 7402.
+The SoGrid â€œPaquets disponiblesâ€ defect is considered resolved for 7402.
 
-## 18. Production-style Windows migration validation — PASS
+## 18. Production-style Windows migration validation â€” PASS
 
 ### Test machine
 
@@ -763,7 +763,7 @@ without manual intervention.
 
 ### Final verdict
 
-**PASS — production-style Windows migration from authentic WAPT 1.8.2.7393 to the rebuilt WAPT 1.8.2.7402 is validated.**
+**PASS â€” production-style Windows migration from authentic WAPT 1.8.2.7393 to the rebuilt WAPT 1.8.2.7402 is validated.**
 
 Validated path:
 
@@ -779,7 +779,7 @@ authentic 7393 client
 
 This is the preferred evidence for the real migration workflow.
 
-## 19. UnknownIssuer diagnostic episode — NON-BLOCKING / CLOSED
+## 19. UnknownIssuer diagnostic episode â€” NON-BLOCKING / CLOSED
 
 During an earlier, more artificial VM105 test path, WAPT 7393 logged:
 
@@ -847,83 +847,308 @@ Important rules:
 - do not force package/build numbers;
 - do not rebuild 7402 after adding a parent WAPT commit unless intentionally creating a new build number.
 
-## 21. Open work after the 7402 Windows milestone
+## 21. Debian 10 production-like server migration â€” VALIDATED
 
-The Windows 7402 Community build/release/migration chain is now validated. Do not continue treating it as the primary blocker.
+The Windows 7402 milestone remains frozen and validated. The production-like Debian 10 server migration milestone has now also been completed successfully.
 
-Remaining work should focus on release preservation/reproducibility and the server migration path.
+### Final rebuilt Debian 10 server package
 
-Priority areas:
+The first rebuilt Buster package was found to contain a temporary runtime-validation `conf/waptserver.ini`. Because `createdeb.py` copied the complete runtime into the package, `dpkg -i` could overwrite the persistent production configuration.
 
-1.  **Preserve the 7402 release state**
+The defect was fixed in:
 
-    - commit this checkpoint only;
-    - push the three already-validated technical commits plus the checkpoint;
-    - preserve hashes, package metadata and build procedure;
-    - ensure private signing material remains outside Git.
+``` text
+88170eee1738b8193966221cbcb03a18c9da4230
+Prevent Debian upgrade from overwriting waptserver config
+```
 
-2.  **Server migration/release path**
+The Buster and Bookworm runtime builders now remove the temporary configuration after runtime tests. `waptserver/deb/createdeb.py` also refuses to build if `runtime_dir/conf/waptserver.ini` is present.
 
-    - decide/validate the exact production upgrade procedure for the 9 existing Debian 10 / WAPT 7393 servers;
-    - validate the rebuilt Debian 10 server package against a production-like upgrade, not only a fresh lab install;
-    - preserve rollback/backups and PostgreSQL migration procedure;
-    - later move through Debian 11 and Debian 12.
+Final traceable Buster package:
 
-3.  **Server cleanup**
+``` text
+tis-waptserver-1.8.2.7398-88170eee-debian-10-amd64.deb
+Version: 1.8.2.7398-88170eee-debian-10-amd64
+Architecture: amd64
+SHA256: fb9406d37c50dfaaa3ee6aec417ac49f2b986730648bcfaf8c3c26be6266a823
+Tag: server-buster-7398-validated
+```
 
-    - fresh DB version marker `1.8.2.0` vs historical `1.8.2.1`;
-    - make local setup/agent publication explicit and reproducible;
-    - remove dependency on obsolete external setup fallback where appropriate.
+`dpkg-deb -c` confirmed that this package does **not** contain `/opt/wapt/conf/waptserver.ini`.
 
-4.  **Build reproducibility**
+A clean production-like 7393 -> 7398 upgrade confirmed that the historical `waptserver.ini` is preserved bit-for-bit.
 
-    - document/recreate Lazarus package setup and inaccessible/private submodule substitutions;
-    - keep Synapse divergence explicit;
-    - optionally clean SoGrid history against the now-restored official history, but **not as part of 7402**.
+### Debian 10 migration script V1.0
 
-5.  **Later modernization**
+Migration tool:
 
-    - Python 3 package/runtime migration remains deferred until the transitional WAPT 1.8.2 chain is stable across the server migration path.
+``` text
+tools/waptserver-migrate-buster.sh
+SCRIPT_VERSION="1.0"
+BACKUP_FORMAT_VERSION="1"
+SOURCE_BUILD="7393"
+validated target build: 7398
+```
+
+Release commit:
+
+``` text
+cc96ac9f1011036358088dea5ed8906916df955b
+Release Debian 10 WAPT migration script 1.0
+```
+
+Script SHA256:
+
+``` text
+e2a53b66a5348bc9789fcef6e6ce2704b03c36632a2ecb351f69507287f7ff55
+```
+
+Annotated release tag:
+
+``` text
+server-buster-migration-7393-7398-validated
+```
+
+Supported modes:
+
+``` text
+precheck
+backup
+check-backup
+check-package
+upgrade
+```
+
+The script performs source validation, verified PostgreSQL/configuration backups, exact target package validation, controlled `dpkg -i`, and post-upgrade checks. It intentionally does **not** run `postconf` and does not perform automatic rollback.
+
+### Real production-clone validation
+
+The final migration was tested on an isolated clone of a real historical production server rather than only on the synthetic Debian 10 lab.
+
+Historical baseline:
+
+``` text
+Debian: 10 Buster
+WAPT: 1.8.2.7393
+Python: 2.7.16
+DB marker: "1.8.2.1"
+
+hostgroups: 3623
+hostpackagesstatus: 25099
+hosts: 675
+hostsoftwares: 105247
+packages: 1056
+waptusers: 1
+```
+
+Final V1.0 migration result:
+
+``` text
+7393 -> 7398: PASS
+RC: 0
+Installed: 1.8.2.7398-88170eee-debian-10-amd64
+waptserver.ini: preserved
+DB marker: "1.8.2.1"
+controlled DB counts: preserved
+```
+
+A format-1 migration backup was also created and independently validated:
+
+``` text
+/var/www/wapt-backups/migration-7393-7398-20260916-115658
+```
+
+Its manifest and SHA256 checks passed.
+
+### Isolated clone topology and persistent safety
+
+The real production clone is VM1900 and is now named:
+
+``` text
+scrab-clone
+```
+
+The true production server `scrab` must never be used for migration experiments.
+
+The clone is attached only to the isolated Proxmox bridge:
+
+``` text
+hyp3 vmbr999:       10.99.99.1/24
+scrab-clone eth0:   10.99.99.2/24
+default route:      none
+```
+
+The historical production interface configuration initially returned after the first reboot because the lab address had only been applied dynamically. The original configuration was saved as:
+
+``` text
+/etc/network/interfaces.pre-isolation
+```
+
+Persistent `/etc/network/interfaces` is now:
+
+``` text
+auto lo
+iface lo inet loopback
+
+allow-hotplug eth0
+iface eth0 inet static
+    address 10.99.99.2
+    netmask 255.255.255.0
+```
+
+A subsequent reboot confirmed `10.99.99.2/24` with only the local `10.99.99.0/24` route and no default route.
+
+The static and transient hostname were synchronized to `scrab-clone`.
+
+**Never reconnect this clone to production `vmbr17`.**
+
+### Post-reboot 7398 validation
+
+After reboot, the migrated server remained functional:
+
+``` text
+waptserver.service: active/running
+wapttasks.service:  active/running
+nginx:              active
+PostgreSQL WAPT DB: accessible
+DB marker:          "1.8.2.1"
+HTTPS:              HTTP/1.1 200 OK
+```
+
+Processes observed included both `wapttasks` and `waptserver`.
+
+An earlier observation that `wapptasks.service` could not be found was transient and is superseded by the explicit post-reboot validation above.
+
+### Agent 7402 / console 7402 against server 7398
+
+VM106 was tested against the isolated clone without replacing its normal production-oriented `wapt-get.ini`. A separate temporary configuration was used through an SSH HTTPS tunnel:
+
+``` text
+VM106 localhost:8443
+    -> hyp3
+    -> 10.99.99.2:443
+    -> nginx
+    -> waptserver 7398
+```
+
+Validated operations:
+
+``` text
+HTTPS:                         PASS
+agent 7402 repository update: PASS
+agent 7402 registration:      PASS
+agent 7402 update-status:     PASS
+server DB receives VM106:     PASS
+console 7402 loads VM106:     PASS
+realtime reachability:        PASS
+```
+
+The historical repository package-signing certificate required explicit trust on the agent:
+
+``` text
+CN: 0790007d
+SHA256:
+1F:D8:56:F8:7E:68:B4:68:83:96:39:28:7A:A0:8E:44:13:86:9C:81:D7:8E:06:9C:D6:B1:91:7C:DD:45:67:34
+```
+
+The certificate embedded in the repository `Packages` archive is not automatically trusted by the agent. Explicitly restoring the relevant WAPT trust certificate is therefore part of the disaster-recovery requirements.
+
+### Socket.IO and port 8088 â€” clarified
+
+Server-side realtime communication uses:
+
+``` text
+agent / console
+    -> HTTPS + Socket.IO on 443
+    -> nginx /socket.io
+    -> 127.0.0.1:8080
+    -> waptserver
+```
+
+There is no required server-side WAPT port 8088.
+
+Port `8088` is the local HTTP listener of the Windows WAPTService.
+
+A temporary foreground WAPTService on VM106 using the isolated test configuration successfully established Socket.IO connectivity to `scrab-clone`; the console then showed VM106 as reachable.
+
+The temporary second service produced a local SQLite `database is locked` message because the normal WAPTService remained active simultaneously. This was a deliberate test artifact, not a server defect. Only the temporary process was terminated afterward.
+
+### Current validated chain
+
+The following path is now validated:
+
+``` text
+historical Debian 10 / WAPT 7393
+    -> verified migration backup
+    -> controlled migration V1.0
+    -> rebuilt Debian 10 / WAPT 7398
+    -> historical DB/config preserved
+    -> reboot survives
+    -> agent 7402 interoperates
+    -> console 7402 interoperates
+    -> HTTPS / Socket.IO interoperates
+```
+
+This closes the production-like **in-place Debian 10 migration validation** milestone.
+
+Remaining work before Debian 11 is now focused on proving autonomous reconstruction and disaster recovery:
+
+1. install WAPT 7398 on a genuinely clean Debian 10 VM;
+2. identify/document all OS and PostgreSQL prerequisites;
+3. validate fresh server initialization;
+4. restore historical 7393 DB/configuration/TLS/repository data onto the fresh server;
+5. validate the restored server with console 7402 and agent 7402;
+6. validate restoration from an evolved 7398 migration backup;
+7. derive a reproducible fresh-install/disaster-recovery procedure;
+8. only then begin Debian 10 -> Debian 11.
+
+Build-environment reproducibility, SoGrid historical realignment and Python 3 modernization remain later work and must not alter the frozen Windows 7402 release.
 
 ## 22. Exact next action
 
-The immediate action after creating this file is **release-state preservation**, not another rebuild.
-
-From:
+The immediate next milestone is:
 
 ``` text
-WAPT HEAD before checkpoint: 895cb7597
-Natural build: 7402
-SoGrid: 540d1814813f2cd5a2445910989f50cfaf1a9228
-Final setup SHA256: ADD5FC3F6D81E394FD821EAA3AC7A3D3543DA9438C2AA474FAAE2B95DD41083C
-Final upgrade package: deb10-waptupgrade 1.8.2.7402-49
-Windows migration validation: PASS
+FRESH DEBIAN 10 INSTALLATION + DISASTER-RECOVERY VALIDATION
 ```
 
-Next steps:
+Do **not** begin Debian 11 yet.
+
+Create or use a genuinely clean, isolated Debian 10 VM with:
 
 ``` text
-1. Replace WAPT_CHECKPOINT.md with this checkpoint.
-2. Review `git diff -- WAPT_CHECKPOINT.md`.
-3. Stage only WAPT_CHECKPOINT.md.
-4. Commit the checkpoint.
-5. Push branch-1.8.2 so the validated technical commits and checkpoint are backed up remotely.
-6. Re-check remote HEAD and working tree; only intentional Synapse divergence should remain.
-7. Then begin the production-like Debian 10 server upgrade validation.
+no inherited /opt/wapt
+no inherited WAPT PostgreSQL database
+no inherited WAPT configuration
+no inherited WAPT repository
 ```
 
-Important build-number consequence: committing this checkpoint will make the branch Git commit count 7403. That **does not invalidate the already-built 7402 artifacts** because they are tied to source commit `895cb7597`. Do not rebuild them merely because the documentation checkpoint adds a later commit.
+Then proceed in this order:
+
+``` text
+1. Inventory the pristine Debian 10 system.
+2. Determine exact PostgreSQL/system prerequisites for WAPT 7398.
+3. Install and initialize the preserved rebuilt WAPT 7398 artifacts.
+4. Validate services, HTTPS, database and basic console/agent interoperability.
+5. Restore the historical 7393 database, configuration, TLS material and repository.
+6. Validate the restored server with console 7402 and agent 7402.
+7. Validate restoration from a 7398-format migration backup.
+8. Document the reproducible fresh-install + disaster-recovery procedure.
+9. Only after PASS, begin Debian 10 -> Debian 11.
+```
+
+Keep all tests isolated. Never perform this validation on the true production server `scrab`.
 
 ## 23. Resume protocol for a new ChatGPT thread
 
 Attach this checkpoint and send:
 
 ``` text
-Gipity, on reprend le projet WAPT 1.8.2 à partir du checkpoint joint.
-Considère WAPT_CHECKPOINT.md comme l'état technique faisant autorité.
-Ne recommence pas les investigations déjà validées sauf si une contradiction apparaît.
-On reprend à la section "Exact next action".
-Réponses courtes, une étape à la fois.
+Gipity, on reprend le projet WAPT 1.8.2 Ã  partir du checkpoint joint.
+ConsidÃ¨re WAPT_CHECKPOINT.md comme l'Ã©tat technique faisant autoritÃ©.
+Ne recommence pas les investigations dÃ©jÃ  validÃ©es sauf si une contradiction apparaÃ®t.
+On reprend Ã  la section "Exact next action".
+RÃ©ponses courtes, une Ã©tape Ã  la fois.
 ```
 
 If later work contradicts this file, update the checkpoint at the next major milestone instead of silently rewriting history.
