@@ -1104,7 +1104,106 @@ Remaining work before Debian 11 is now focused on proving autonomous reconstruct
 
 Build-environment reproducibility, SoGrid historical realignment and Python 3 modernization remain later work and must not alter the frozen Windows 7402 release.
 
-## 22. Exact next action
+## 22. Debian 10 fresh-install packaging preparation
+
+Historical installation documentation confirms that a normal WAPT 1.8 Debian server installation used both `tis-waptserver` and `tis-waptsetup`. The fresh-install/DR validation must therefore include `tis-waptsetup`; validating `tis-waptserver` alone would not reproduce the historical installation model.
+
+### Historical waptsetup naming
+
+Repository history establishes why the server-side Windows installer is named `waptsetup-tis.exe`.
+
+Commit `46619c63df691451d4945d0818026e2e86fad9cf` (`waptsetup.deb : correctifs`) explicitly changed the packaged executable from `waptsetup.exe` to `waptsetup-tis.exe` to avoid overwriting a potentially customized `waptsetup.exe`.
+
+Therefore:
+
+``` text
+Windows build output:       waptsetup.exe
+official server-side copy:  waptsetup-tis.exe
+```
+
+This is historical behavior and must be preserved.
+
+### Reconstructed tis-waptsetup 7402
+
+An isolated worktree was created at the immutable Windows tag:
+
+``` text
+v1.8.2.7402
+895cb7597cf8d12ed149a3913dbfe197d39e5b62
+git rev-count = 7402
+```
+
+A temporary local build branch pointing exactly at that commit was required because the historical builder uses GitPython `active_branch`.
+
+The validated Windows 7402 artifacts were supplied to the builder:
+
+``` text
+waptsetup-tis.exe
+SHA256 ADD5FC3F6D81E394FD821EAA3AC7A3D3543DA9438C2AA474FAAE2B95DD41083C
+
+waptdeploy.exe
+SHA256 C2C05314C9DBB8CF2118257C66D4CBD0FA6F75705D337B4131126552ED1A138D
+```
+
+The historical Debian builder successfully produced:
+
+``` text
+tis-waptsetup-windows-1.8.2.7402-895cb759.deb
+Package:      tis-waptsetup
+Version:      1.8.2.7402
+Architecture: all
+Depends:      nginx
+SHA256: d51c8beaf1aedb6950d650e251afbf00f8baf85476851452d4502f8f51512b7e
+```
+
+Package extraction confirmed bit-for-bit that the embedded executables have exactly the validated 7402 hashes above. A preserved copy exists under `build/artifacts/debian10/` with the same package SHA256.
+
+This package is a validated reconstruction artifact for fresh-install testing. It is not yet declared the final autonomous Debian release package.
+
+### Server/setup version relationship
+
+Historical `waptserver/deb/createdeb.py` and `waptsetup/deb/createdeb.py` both derive the fourth version component from `r.active_branch.commit.count()`.
+
+The historical production installation also used matching build numbers:
+
+``` text
+tis-waptserver 1.8.2.7393-...
+tis-waptsetup  1.8.2.7393
+```
+
+The current reconstructed artifacts intentionally come from two different development milestones:
+
+``` text
+Debian 10 validation server: 1.8.2.7398
+Windows validated release:   1.8.2.7402
+reconstructed setup package: 1.8.2.7402
+```
+
+Do not artificially rename 7398 to 7402.
+
+Git history currently shows that the Windows 7402 lineage and Debian 10 lineage diverge from `4bbf306ad8342fc5637236c2f45aee9073ef0291`, with:
+
+``` text
+Windows 7402 side: 7 commits
+Debian 10 side:    10 commits
+Debian 10 HEAD:    cc96ac9f1011036358088dea5ed8906916df955b
+Debian 10 rev-count: 7405
+```
+
+A future autonomous release should reunify the validated lineages and then build server/setup consistently from a common release state with a natural build number greater than 7405.
+
+Do not perform that reunification until fresh-install and disaster-recovery validation is complete.
+
+### Windows code-signing status
+
+The validated Windows 7402 executables are currently signed using the temporary self-signed laboratory code-signing certificate.
+
+They remain valid functional/build-reference artifacts, but this signature must not silently become the final distribution trust model.
+
+Before freezing an autonomous production release, explicitly review the Windows code-signing strategy and revalidate any artifacts whose Authenticode signature or resulting SHA256 changes.
+
+
+## 23. Exact next action
 
 The immediate next milestone is:
 
@@ -1139,7 +1238,7 @@ Then proceed in this order:
 
 Keep all tests isolated. Never perform this validation on the true production server `scrab`.
 
-## 23. Resume protocol for a new ChatGPT thread
+## 24. Resume protocol for a new ChatGPT thread
 
 Attach this checkpoint and send:
 
