@@ -1238,6 +1238,120 @@ Then proceed in this order:
 
 Keep all tests isolated. Never perform this validation on the true production server `scrab`.
 
+### 23.1 Fresh Debian 10 installation validation - PASS (2026-09-17)
+
+A genuinely pristine Debian 10 VM `wapt-deb10` was used. Before installation, no WAPT, PostgreSQL or nginx packages/services were present.
+
+Validated local packages:
+
+``` text
+tis-waptserver 1.8.2.7398-88170eee-debian-10-amd64
+SHA256 fb9406d37c50dfaaa3ee6aec417ac49f2b986730648bcfaf8c3c26be6266a823
+
+tis-waptsetup 1.8.2.7402
+SHA256 d51c8beaf1aedb6950d650e251afbf00f8baf85476851452d4502f8f51512b7e
+```
+
+APT successfully resolved and installed both packages together. Before `postconf.sh`, PostgreSQL 11/main existed on 5432, nginx was running, waptserver was installed but inactive, and `/opt/wapt/conf/waptserver.ini` did not exist. This confirms that corrected server package 7398 does not inject the temporary validation configuration. `waptsetup-tis.exe` and `waptdeploy.exe` were present under `/var/www/wapt/`.
+
+Interactive `/opt/wapt/waptserver/scripts/postconf.sh` completed successfully with unauthenticated registration (historical compatibility mode), nginx configuration, FQDN `wapt-deb10.genevoix-signoret-vinci.fr.lan`, and startup of waptserver/wapttasks.
+
+Validated after postconf:
+
+``` text
+PostgreSQL 11/main: online / 5432
+WAPT database:       created
+waptserver:          active/running
+wapttasks:           active/running
+nginx:               active/running
+nginx:               80 / 443
+waptserver:          127.0.0.1:8080
+local HTTPS:         HTTP 200
+VM106 HTTPS:         HTTP 200
+```
+
+### Fresh Windows client and agent publication
+
+VM106's existing WAPT installation was removed. `waptsetup-tis.exe` was downloaded directly from the fresh server portal and installed with:
+
+``` text
+repository: https://wapt-deb10.genevoix-signoret-vinci.fr.lan/wapt
+server:     https://wapt-deb10.genevoix-signoret-vinci.fr.lan/
+```
+
+VM106 successfully registered in the fresh database:
+
+``` text
+computer_fqdn: vm106.genevoix-signoret-vinci.fr.lan
+UUID:          3154B5EF-2BAD-44A5-80FF-E31A6D7FCA1A
+```
+
+The original production 7393 setup and rebuilt 7402 setup were compared at the installation-options screen. Both expose the same choices and neither exposes a third Wizard choice. The Wizard shown in documentation is therefore not evidence of a regression in reconstructed 7402.
+
+A new WAPT package-signing identity dedicated to this fresh environment was generated from WAPTConsole:
+
+``` text
+C:\private-wapt-deb10-fresh
+basename: wapt-deb10-fresh
+```
+
+Its certificate was copied to the WAPT authorized package certificate store. The older `C:\private\wapt-deb10-cert.*` files dated 2026-09-14 were deliberately not reused.
+
+Before agent generation the portal showed `Version WAPT Agent: N/A`. WAPTConsole 1.8.2.7402 then generated and published:
+
+``` text
+/var/www/wapt/waptagent.exe
+FileVersion:    1.8.2.7402
+ProductVersion: 1.8.2.7402
+SHA256: 8b046b85f129ba3104aa2592c94a23fd56f6787913159112e02c1454718a1e92
+```
+
+After generation the portal showed `Version WAPT Agent: 1.8.2.7402`, exposed the Agent WAPT download, and advertised the matching SHA256.
+
+Executable comparison confirmed that both the historical production 7393 `waptagent.exe` and freshly generated 7402 `waptagent.exe` are Authenticode `NotSigned`. Production 7393 setup/deploy are signed by TRANQUIL I.T. SYSTEMS; rebuilt 7402 setup/deploy are signed by the temporary `WAPT Lab Code Signing` certificate.
+
+### Console/package deployment validation
+
+WAPTConsole 1.8.2.7402 connected successfully to the fresh server and displayed VM106. An initial HTTP 401 was traced to a stale console configuration still pointing to `localhost:8443`; correcting the endpoint to the fresh-server FQDN resolved it.
+
+The console assigned and successfully deployed:
+
+``` text
+deb10-waptupgrade 1.8.2.7402-45
+```
+
+to VM106. The task completed, the package was reported installed, and VM106 returned to status `OK`.
+
+Validated chain:
+
+``` text
+pristine Debian 10
+ -> tis-waptserver 7398 + tis-waptsetup 7402
+ -> interactive postconf
+ -> HTTPS / PostgreSQL / WAPT services
+ -> setup downloaded from fresh portal
+ -> fresh Windows installation + registration
+ -> fresh package-signing identity
+ -> waptagent.exe 7402 generation/publication
+ -> console 7402
+ -> successful package deployment to VM106
+```
+
+Result:
+
+``` text
+FRESH DEBIAN 10 INSTALLATION + WINDOWS CLIENT + PACKAGE DEPLOYMENT: PASS
+```
+
+### Remaining work before Debian 11
+
+1. Trace why this fresh repository currently exposes `deb10-waptupgrade 1.8.2.7402-45`. The checkpoint already establishes that the suffix is a WAPT package revision counter, not the Git build number.
+2. Restore historical 7393 DB/configuration/TLS/repository onto a clean reconstructed server and validate with console/agent 7402.
+3. Validate restoration from an evolved 7398-format migration backup.
+4. Document the reproducible fresh-install + disaster-recovery procedure.
+5. Evaluate autonomous distribution without an external website: Git-synchronized installation versus a project-owned APT repository.
+6. Only after disaster-recovery PASS, begin Debian 10 -> Debian 11.
+
 ## 24. Resume protocol for a new ChatGPT thread
 
 Attach this checkpoint and send:
