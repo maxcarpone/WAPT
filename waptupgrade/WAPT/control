@@ -1,5 +1,5 @@
 package           : tis-waptupgrade
-version           : 1.8.2.1-44
+version           : 1.8.2.1-0
 architecture      : all
 section           : base
 priority          : critical
