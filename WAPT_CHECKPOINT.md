@@ -2409,4 +2409,388 @@ evolved 7398 backup
 ```
 
 Do not begin Debian 11 yet.
+## 31. Restore target precheck — V0.2.1 functionally validated (2026-09-18)
 
+Restore development continued from the committed V0.1.5 `--check` milestone.
+The next objective was to validate the **target** before allowing any
+destructive restore operation.
+
+A V0.2 development interface added:
+
+``` text
+--check
+--restore
+```
+
+At this stage `--restore` remained deliberately non-destructive and exited
+after target validation.
+
+### 31.1 PostgreSQL target-selection contract implemented
+
+The first V0.2 candidate assumed exactly one online PostgreSQL cluster. This
+was rejected before repository integration because it would be unnecessarily
+strict on systems containing several legitimate clusters.
+
+V0.2.1 instead:
+
+``` text
+1. enumerates online clusters reported by pg_lsclusters;
+2. tests each cluster on its actual runtime port;
+3. selects the unique online cluster containing an accessible database named wapt;
+4. fails if zero or more than one matching WAPT database is found;
+5. uses that detected cluster/version/port for all subsequent target operations.
+```
+
+This implements the previously agreed DR contract:
+
+``` text
+source PostgreSQL version/port = backup metadata only
+target PostgreSQL runtime/port = detected from the restore target
+```
+
+It therefore does not blindly reuse a source port or PostgreSQL major version.
+
+### 31.2 Real target used for validation
+
+Target:
+
+``` text
+hostname:               wapt-deb10
+Debian:                 10.13
+tis-waptserver:         1.8.2.7398-88170eee-debian-10-amd64
+tis-waptsetup:          1.8.2.7402
+target PostgreSQL:      11.22 (Debian 11.22-0+deb10u2)
+target cluster:         11/main
+target port:            5432
+target WAPT DB owner:   wapt
+target DB marker:       "1.8.2.1"
+waptserver.service:     active
+```
+
+The source DR archive was the validated Backup V1.0 artifact produced on
+`scrab-clone`:
+
+``` text
+/tmp/wapt-dr-scrab-clone-20260918-123430.tar
+/tmp/wapt-dr-scrab-clone-20260918-123430.tar.sha256
+```
+
+The archive was transferred through the isolated lab path:
+
+``` text
+scrab-clone -> hyp3 -> wapt-deb10
+```
+
+No production server was involved.
+
+The archive occupied about 13 GiB. Before the check, the target filesystem
+state was approximately:
+
+``` text
+filesystem: /dev/vda2
+size:       62 GiB
+used:       39 GiB
+free:       20 GiB
+usage:      67%
+
+/tmp/wapt-dr-scrab-clone-20260918-123430.tar: ~13 GiB
+/var/www/wapt:                                      ~13 GiB
+```
+
+There were no significant stale DR staging trees to remove. Only small
+previous-test artifacts existed:
+
+``` text
+/var/www/wapt-fresh-before-dr: ~80 MiB
+/root/pre-dr-fresh:            ~104 KiB
+```
+
+### 31.3 V0.2.1 `--restore` precheck — PASS
+
+The non-destructive target-precheck run completed successfully.
+
+Important output:
+
+``` text
+Source PostgreSQL:      9.6
+Source PostgreSQL port: 5432 (metadata only)
+
+Target Debian:          10
+Target WAPT server:     1.8.2.7398-88170eee-debian-10-amd64
+Target WAPT setup:      1.8.2.7402
+Target PostgreSQL:      11.22 (Debian 11.22-0+deb10u2)
+Target PG cluster:      11/main
+Target PostgreSQL port: 5432
+Target DB owner:        wapt
+Target DB marker:       "1.8.2.1"
+
+[ OK ] Restore target precheck passed
+
+RESTORE PRECHECK PASSED
+No target WAPT data was modified.
+```
+
+This experimentally proves that the restore checker distinguishes source
+PostgreSQL metadata from the actual target runtime.
+
+The run also repeated the already-established format-1 archive checks,
+including repository and bundle SHA256 validation. These integrity checks are
+retained for safety, but avoid asking the administrator to perform additional
+manual SHA256 passes over the 13 GiB archive unless they are actually needed.
+The scripted integrity controls are sufficient during normal restore workflow.
+
+The large extraction again used `/var/www`, never `/tmp`.
+
+After completion:
+
+``` text
+df -h / -> about 20 GiB free again
+find /var/www -maxdepth 1 -type d -name '.wapt-dr-restore-*' -> no result
+```
+
+Therefore cleanup of the temporary extraction tree is also validated.
+
+The initial V0.2.1 test binary still displayed `v0.2` because the internal
+version string had not been incremented when the PostgreSQL-selection logic
+was changed. This was corrected afterward to:
+
+``` text
+SCRIPT_VERSION="0.2.1"
+```
+
+No second 13 GiB validation run is required merely for that version-string
+correction.
+
+On Wapster, the corrected V0.2.1 was copied into:
+
+``` text
+tools/waptserver-restore.sh
+```
+
+Current tracked/untracked state at that point:
+
+``` text
+ M tools/waptserver-restore.sh
+?? WAPT_CHECKPOINT.md
+```
+
+The untracked Wapster `WAPT_CHECKPOINT.md` remains the known old duplicate and
+must not be committed. VM106 remains the authoritative checkpoint working
+tree.
+
+V0.2.1 has **not** been committed as a separate milestone. The last committed
+restore baseline remains:
+
+``` text
+faf4335b Add validated WAPT server DR restore check
+```
+
+## 32. Lightweight target safety-backup design and V0.3 candidate
+
+Before implementing destructive restore operations, the target safety-backup
+policy was clarified.
+
+### 32.1 Safety-backup scope
+
+A fresh reconstruction target is expected to have little or no historical
+package payload in `/var/www/wapt`; the important package-owned artifacts are
+primarily:
+
+``` text
+/var/www/wapt/waptsetup-tis.exe
+/var/www/wapt/waptdeploy.exe
+```
+
+The current `wapt-deb10` contains about 13 GiB only because it has already
+served as the manual historical DR validation target.
+
+Duplicating the entire current repository before every restore would therefore
+consume large amounts of disk space without matching the normal clean-target
+scenario.
+
+The agreed safety-backup contract is:
+
+``` text
+SAFETY BACKUP = mutable critical target state, WITHOUT repository package payload
+DR ARCHIVE     = complete restoration source, optionally including repository
+```
+
+The safety backup should contain:
+
+``` text
+- logical PostgreSQL dump of the current target WAPT database;
+- /opt/wapt/conf;
+- target WAPT server TLS directory;
+- target nginx WAPT configuration as reference;
+- target Debian/WAPT/PostgreSQL/cluster/port/DB-marker metadata;
+- lightweight repository inventory;
+- target waptsetup-tis.exe if present;
+- target waptdeploy.exe if present.
+```
+
+It deliberately does **not** copy the package/repository payload.
+
+This safety archive is intended to protect the target's critical mutable state
+before destructive restore work. By design, it is **not** a bit-for-bit
+rollback copy of the previous repository payload, and the script/report must
+not imply otherwise.
+
+This resolves the disk-space problem on the current 62 GiB `wapt-deb10`
+without weakening the main DR archive.
+
+### 32.2 Repository restore authority remains unchanged
+
+During the later real repository restore, historical content from the DR
+archive must still preserve the target package-owned files:
+
+``` text
+waptsetup-tis.exe
+waptdeploy.exe
+```
+
+Those files remain authoritative from the target `tis-waptsetup` package,
+currently 1.8.2.7402.
+
+Historical `waptagent.exe` may be restored temporarily with repository
+content, but the final administrative procedure must require regeneration
+from the current console after authorized-certificate review.
+
+### 32.3 V0.3 candidate prepared — NOT YET EXECUTION-VALIDATED
+
+A complete V0.3 candidate was generated from the validated V0.2.1 development
+state.
+
+Candidate script SHA256:
+
+``` text
+9d89b2deee2b499be4d43f429be5e6276aae9af61811abc781867f41fe23f6ca
+```
+
+Wapster validation performed:
+
+``` text
+sha256sum: expected value matched
+bash -n:   PASS
+diff V0.2.1 -> V0.3: reviewed
+```
+
+V0.3 adds:
+
+``` text
+- SCRIPT_VERSION="0.3";
+- automatic sudo re-exec for --restore when not already root;
+- creation of /var/www/wapt-backups if needed;
+- secure lightweight target safety-backup staging;
+- target PostgreSQL custom-format dump;
+- capture of /opt/wapt/conf;
+- capture of /opt/wapt/waptserver/ssl;
+- capture of nginx WAPT configuration when present;
+- copy of waptsetup-tis.exe and waptdeploy.exe when present;
+- target metadata;
+- repository inventory only, not repository payload;
+- 0700 safety-backup directories and 0600 files/archive;
+- structural tar validation;
+- pg_restore readability validation of the DB dump inside the safety archive;
+- cleanup of safety-backup staging;
+- deliberate barrier after successful safety backup.
+```
+
+The intended V0.3 terminal barrier is:
+
+``` text
+SAFETY BACKUP PASSED
+Destructive restore operations are not implemented yet in v0.3.
+Target database, configuration and repository were NOT replaced.
+```
+
+V0.3 does **not** yet:
+
+``` text
+- stop WAPT/nginx services;
+- drop or replace the target database;
+- restore the source database;
+- merge waptserver.ini;
+- restore historical CA/TLS identity;
+- restore repository content;
+- change operational repository permissions;
+- perform final service/HTTPS/client validation.
+```
+
+Therefore V0.3 is currently:
+
+``` text
+SYNTAX VALIDATED + DIFF REVIEWED
+NOT YET EXECUTION-VALIDATED
+NOT COMMITTED
+```
+
+Do not describe it as a validated restore milestone until the lightweight
+safety-backup run has actually passed on the isolated target.
+
+## 33. Exact next action — weekend resume point
+
+The project is deliberately stopped at a safe boundary. No destructive restore
+operation is in progress.
+
+The immediate next milestone is:
+
+``` text
+EXECUTE AND VALIDATE V0.3 LIGHTWEIGHT TARGET SAFETY BACKUP
+```
+
+Resume in this order:
+
+``` text
+1. Keep the validated V0.2.1 state as the functional target-precheck reference.
+2. Transfer/use the already reviewed V0.3 candidate on isolated wapt-deb10.
+3. Run V0.3 --restore against the validated format-1 DR archive.
+4. Confirm:
+     - target precheck still passes;
+     - safety DB dump is valid;
+     - critical target config/identity is captured;
+     - package-owned setup/deploy artifacts are captured when present;
+     - repository payload is NOT duplicated;
+     - safety archive is structurally valid;
+     - staging is cleaned;
+     - no target DB/config/repository has been replaced.
+5. Inspect safety archive size and free-space recovery.
+6. If PASS, preserve the exact V0.3 script and record the validation milestone.
+7. Only then implement the next destructive-development phase:
+     - controlled service stop;
+     - logical DB replacement into detected target PostgreSQL runtime;
+     - targeted ownership/schema ACL repair;
+     - deliberate barrier and validation before config/repository restoration.
+8. Continue incrementally through selective config/identity restore,
+   repository restore preserving waptsetup-tis.exe/waptdeploy.exe,
+   operational permissions, restart and final administrative report.
+9. After a complete real DR restore passes, validate with an evolved 7398
+   backup and at least one historical client.
+10. Freeze restore V1.0 and Debian 10 DR only after those PASS results.
+11. Consolidate the first autonomous release as 1.8.3.1.
+12. Only then begin Debian 11.
+```
+
+Important weekend/restart rules:
+
+``` text
+- true production scrab remains untouched;
+- scrab-clone remains isolated on vmbr999 with no default route;
+- large restore staging belongs under /var/www, never /tmp;
+- source PostgreSQL version/port are metadata only;
+- detect the target cluster containing database wapt;
+- do not duplicate the repository in the lightweight safety backup;
+- preserve target waptsetup-tis.exe and waptdeploy.exe during repository restore;
+- do not commit Wapster's untracked duplicate WAPT_CHECKPOINT.md;
+- VM106 C:\git\waptdev\WAPT_CHECKPOINT.md is the authoritative checkpoint;
+- do not begin Debian 11.
+```
+
+The resume protocol remains:
+
+``` text
+Gipity, on reprend le projet WAPT à partir du checkpoint joint.
+Considère WAPT_CHECKPOINT.md comme l'état technique faisant autorité.
+Ne recommence pas les investigations déjà validées sauf si une contradiction apparaît.
+On reprend à la section "Exact next action".
+Réponses courtes, une étape à la fois.
+```
