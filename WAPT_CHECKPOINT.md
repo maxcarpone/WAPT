@@ -1,6 +1,6 @@
 # WAPT 1.8.2 Modernization â€” Technical Checkpoint
 
-**Checkpoint date:** 2026-09-17
+**Checkpoint date:** 2026-09-18
 **Purpose:** authoritative save-state for resuming the WAPT Community modernization project without replaying the historical conversation.
 
 ## 1. Project objective
@@ -1352,7 +1352,524 @@ FRESH DEBIAN 10 INSTALLATION + WINDOWS CLIENT + PACKAGE DEPLOYMENT: PASS
 5. Evaluate autonomous distribution without an external website: Git-synchronized installation versus a project-owned APT repository.
 6. Only after disaster-recovery PASS, begin Debian 10 -> Debian 11.
 
-## 24. Resume protocol for a new ChatGPT thread
+## 24. Debian 10 historical DR validation — PASS (2026-09-18)
+
+The fresh Debian 10 installation from section 23.1 was subsequently used
+to validate a real disaster-recovery scenario from the historical WAPT
+1.8.2.7393 production state.
+
+The true production server `scrab` was never used for restoration tests.
+Historical data came from the isolated `scrab-clone` and from the verified
+migration backup:
+
+``` text
+/var/www/wapt-backups/migration-7393-7398-20260916-115658
+```
+
+Verified backup payload:
+
+``` text
+wapt-scrab.dump
+SHA256 da015083db04e82be26b93be1cd2fe29718b011a15e4002706bd305d860f01d1
+
+wapt-config-scrab.tar.gz
+SHA256 64d15a21e400746d42daa0f3a003b1a47a999a0ff389a1e68e8a94a86b59c783
+```
+
+Historical database marker:
+
+``` text
+"1.8.2.1"
+```
+
+Historical controlled counts:
+
+``` text
+hosts:               675
+hostgroups:          3623
+hostpackagesstatus:  25099
+hostsoftwares:       105247
+packages:            1056
+waptusers:           1
+```
+
+### PostgreSQL restore procedure — validated
+
+The historical dump cannot simply be restored as the `wapt` role because
+the dump needs sufficient privileges for objects such as the `hstore`
+extension.
+
+The validated procedure is:
+
+1. create the target database owned by `wapt`;
+2. remove the default `public` schema before restore because the dump
+   recreates it;
+3. run `pg_restore --no-owner` as the PostgreSQL superuser;
+4. transfer ownership only for restored WAPT application tables and
+   sequences to `wapt`;
+5. restore the required schema ACL.
+
+The schema ACL was an important finding. `waptserver` initially failed
+with:
+
+``` text
+relation "serverattribs" does not exist
+```
+
+although `public.serverattribs` existed. The restored `public` schema did
+not grant the WAPT role the required access.
+
+Validated correction:
+
+``` sql
+GRANT USAGE, CREATE ON SCHEMA public TO wapt;
+```
+
+Do **not** use a global:
+
+``` text
+REASSIGN OWNED BY postgres TO wapt
+```
+
+because PostgreSQL owns system objects which must remain PostgreSQL-owned.
+
+After the targeted ownership/ACL corrections, the historical WAPT
+database was fully usable and its controlled counts matched the source.
+Later changes in `hostpackagesstatus` are attributable to normal lab
+client activity after restoration, not restore corruption.
+
+### Historical configuration and TLS restore
+
+The historical WAPT configuration, client CA, TLS material and nginx
+configuration were restored from the verified backup.
+
+The historical server certificate remains:
+
+``` text
+CN=scrab.genevoix-signoret-vinci.fr.lan
+```
+
+This is intentionally preserved during faithful DR. In the laboratory,
+the restored server is addressed as
+`wapt-deb10.genevoix-signoret-vinci.fr.lan`, so strict hostname
+verification would not match. Do not alter production DNS or server
+identity merely to make the laboratory hostname match.
+
+The historical restored `waptserver.ini` retains its historical
+permissions during faithful validation. Permission hardening is a later
+modernization task, not part of the faithful DR proof.
+
+### Historical repository restore — bit-for-bit validation
+
+The migration backup does not contain the complete historical package
+repository, so `/var/www/wapt` was transferred separately from the
+isolated production clone.
+
+Repository size was approximately 13 GiB.
+
+Integrity was proven using sorted SHA256 manifests on both source and
+destination:
+
+``` text
+source files:       847
+destination files:  847
+
+manifest SHA256:
+8a67e8518ff96b47e40ac1c101c38113173183b67ed09ceafb91a0d86b725f67
+```
+
+Historical `/var/www/wapt/Packages` SHA256:
+
+``` text
+fbcb45ba5eca2ec6d2f183e951ffcdbe8ad9686d811bd4b1bc4f36f67ab364b1
+```
+
+The embedded historical package-signing certificate is:
+
+``` text
+CN: 0790007d
+fingerprint:
+1fd856f87e68b468839639287aa08e4413869c81d78e069cd6b1917cdd456734
+```
+
+The certificate embedded in the repository index does not automatically
+establish client trust. Historical clients already trusting this
+certificate can consume the restored repository normally.
+
+### Package-signing key architecture — clarified
+
+The historical `0790007d` package-signing private key is **not** part of
+the WAPT server backup.
+
+The server contains other private-key roles:
+
+``` text
+client-certificate CA private key
+HTTPS/TLS server private key
+```
+
+These are distinct from the administrator's WAPT package-signing key.
+
+Historical operational behavior was confirmed: the package-signing
+certificate/private key belongs to the administrator/console environment
+and must be backed up separately if signing continuity is required.
+
+For this DR validation the historical administrator certificate/private
+key was recovered from the administrative backup and loaded into
+WAPTConsole 1.8.2.7402.
+
+### waptupgrade revision baseline — corrected and validated
+
+The historical source template contained:
+
+``` text
+waptupgrade/WAPT/control
+version : 1.8.2.1-44
+```
+
+On a completely empty repository this caused a freshly generated package
+to start at:
+
+``` text
+deb10-waptupgrade 1.8.2.7402-45
+```
+
+The source baseline was corrected to:
+
+``` text
+version : 1.8.2.1-0
+```
+
+Commit:
+
+``` text
+6591839b9 Reset waptupgrade package revision baseline
+```
+
+A real generation against an empty repository then produced:
+
+``` text
+deb10-waptupgrade 1.8.2.7402-1
+```
+
+This does not rewrite historical package history. When the restored
+historical repository contains:
+
+``` text
+0790007d-waptupgrade 1.8.2.7393-16
+```
+
+the normal WAPT revision-continuity mechanism correctly generates:
+
+``` text
+0790007d-waptupgrade 1.8.2.7402-17
+```
+
+signed by:
+
+``` text
+0790007d
+fingerprint:
+1fd856f87e68b468839639287aa08e4413869c81d78e069cd6b1917cdd456734
+```
+
+The previously validated `deb10-waptupgrade 1.8.2.7402-49` remains a
+valid historical reconstruction milestone and must not be rewritten.
+
+### Repository restore rule for Setup/Deploy
+
+A complete historical `/var/www/wapt` restore overwrote two files owned
+by the installed target `tis-waptsetup` package:
+
+``` text
+/var/www/wapt/waptsetup-tis.exe
+/var/www/wapt/waptdeploy.exe
+```
+
+This was proven by:
+
+``` text
+dpkg -V tis-waptsetup
+```
+
+which reported MD5 mismatches after the repository restore.
+
+For the current validation, reinstalling the target
+`tis-waptsetup 1.8.2.7402` restored the exact validated files:
+
+``` text
+waptsetup-tis.exe
+SHA256 add5fc3f6d81e394fd821eaa3ac7a3d3543da9438c2aa474faae2b95dd41083c
+
+waptdeploy.exe
+SHA256 c2c05314c9dbb8cf2118257c66d4cbd0fa6f75705d337b4131126552ed1a138d
+```
+
+After correction:
+
+``` text
+dpkg -V tis-waptsetup
+```
+
+returned no output.
+
+The **final DR procedure should not require this corrective reinstall**.
+When restoring the historical repository, exclude:
+
+``` text
+wapt/waptsetup-tis.exe
+wapt/waptdeploy.exe
+```
+
+so that the target files installed by `tis-waptsetup` remain untouched.
+
+`waptagent.exe` is intentionally different: it should be regenerated
+after restoration from the target/current WAPT console.
+
+### Agent regeneration requirement
+
+After restoring an older WAPT environment onto a newer reconstructed
+target, the administrator must explicitly:
+
+``` text
+1. open the target/current WAPT console;
+2. load/verify the intended package-signing certificate;
+3. verify the authorized package-certificate bundle;
+4. regenerate waptagent.exe and the waptupgrade package.
+```
+
+This requirement must be difficult to miss in the final DR tooling.
+Decide later whether it is implemented as an end-of-restore message or
+popup, a dedicated Markdown procedure, or both.
+
+The DR-generated target agent used in this validation is:
+
+``` text
+FileVersion: 1.8.2.7402
+SHA256:
+857a2c3a06defc674ba6b1991bcc208449a6464b014e07c3d43801fed83dfab7
+```
+
+Inspection on a clean Windows system confirmed that generated agents
+bundle certificates from the console's authorized certificates
+directory. The package signer selected by the console and the authorized
+certificate bundle embedded into the agent are separate concepts.
+
+### Reboot validation — PASS
+
+The faithfully restored server survived a complete reboot.
+
+Validated after reboot:
+
+``` text
+waptserver:          active/running
+wapttasks:           active/running
+nginx:               active/running
+postgresql:          active
+PostgreSQL 11/main:  5432 online
+DB marker:           "1.8.2.1"
+HTTPS:               HTTP 200
+repository files:    847
+historical Packages: SHA256 preserved
+```
+
+An initially inconsistent `systemctl` observation for `wapttasks` was
+transient. The unit existed, was enabled and its process had started at
+boot. `daemon-reload` did not start the service.
+
+### True historical client 7393 -> 7402 migration — PASS
+
+VM104 was selected as a genuine laboratory client still running:
+
+``` text
+hostname: VM104
+IP: 192.168.220.4
+initial WAPT: 1.8.2.7393
+```
+
+Its WAPT trust store already contained the genuine historical package
+certificate:
+
+``` text
+0790007d-20181217-150755.crt
+```
+
+Only VM104's internal WAPT endpoints were redirected from true production
+to the reconstructed laboratory server. Production DNS and the true
+production server were not modified.
+
+Initial main WAPT configuration after redirection:
+
+``` ini
+[global]
+repo_url=https://wapt-deb10.genevoix-signoret-vinci.fr.lan/wapt
+wapt_server=https://wapt-deb10.genevoix-signoret-vinci.fr.lan
+verify_cert=0
+
+[wapt-templates]
+repo_url=https://store.wapt.fr/wapt
+verify_cert=1
+```
+
+The authentic 7393 client successfully read the restored repository:
+
+``` text
+Total packages: 167
+Added:
+  0790007d-waptupgrade (=1.8.2.7402-17)
+Removed: none
+Discarded packages count: 11
+```
+
+Both historical and new package versions were visible with the expected
+historical signer/fingerprint.
+
+#### Important dry-run finding
+
+Running:
+
+``` text
+wapt-get -d install 0790007d-waptupgrade
+```
+
+correctly skipped `setup.install()` but nevertheless recorded
+`0790007d-waptupgrade 1.8.2.7402-17` as `OK` in the local WAPT database.
+
+The following normal install was therefore skipped although the actual
+agent binary was still 7393.
+
+**Do not use `-d / --dry-run` as a preflight for a real WAPT agent
+upgrade.**
+
+The supported `-f / --force` option was then used for the real test.
+
+The package created the scheduled task `fullwaptupgrade` under
+`NT AUTHORITY\SYSTEM` and reported:
+
+``` text
+Setting up upgrade from WAPT version 1.8.2.7393 to 1.8.2.7402.
+```
+
+After the scheduled task executed:
+
+``` text
+wapt-get.exe --version -> 1.8.2.7402
+WAPTService -> Running / Automatic
+fullwaptupgrade temporary task -> removed
+console 7402 -> VM104 Reachable OK
+0790007d-waptupgrade 1.8.2.7402-17 -> installed / OK
+```
+
+A final repository update from the upgraded client returned:
+
+``` text
+Total packages: 167
+Added packages: none
+Removed packages: none
+Discarded packages count: 11
+Pending operations: none
+```
+
+This proves the complete historical migration path:
+
+``` text
+authentic client 7393
+    -> historical 0790007d trust
+    -> reconstructed Debian 10 server 7398
+    -> restored historical DB/config/TLS/repository
+    -> console 7402 with historical package-signing key
+    -> regenerated waptagent.exe 7402
+    -> 0790007d-waptupgrade 1.8.2.7402-17
+    -> scheduled self-upgrade
+    -> client 7402
+    -> WAPTService Running
+    -> console Reachable OK
+    -> repository update PASS
+```
+
+**PASS — fresh Debian 10 reconstruction + historical 7393 disaster
+recovery + authentic client 7393 -> 7402 migration are validated
+end-to-end.**
+
+### Production-isolation conclusion
+
+The restored production database contains historical production hosts,
+but this does not redirect those hosts to the laboratory server. WAPT
+agents initiate connections using their own configured repository/server
+URLs.
+
+The true production `scrab` address/DNS remains untouched. Only explicitly
+reconfigured laboratory clients connect to `wapt-deb10`.
+
+Never change production DNS or reconnect isolated clones as part of this
+validation.
+
+## 25. Consolidated autonomous release direction
+
+The existing version numbers remain meaningful validation milestones:
+
+``` text
+7398 = Debian 10 reconstructed server/migration milestone
+7402 = validated Windows client/console/setup milestone
+```
+
+Do not artificially rename the 7398 server to 7402.
+
+After all remaining Debian 10 DR work is complete, the first deliberately
+consolidated autonomous release is planned as:
+
+``` text
+1.8.3.1
+```
+
+Before freezing 1.8.3.1:
+
+1. reunify the validated Windows and Debian source lineages;
+2. build server/setup/client artifacts consistently from the common
+   release state;
+3. provide an autonomous installation/distribution mechanism which does
+   not depend on obsolete external WAPT repositories;
+4. explicitly review the final Windows Authenticode signing strategy;
+5. keep Authenticode trust and WAPT package-signing trust distinct;
+6. implement an explicit, idempotent database migration from marker
+   `1.8.2.1` to at least `1.8.3.0`, even if no new tables or schema DDL
+   are required;
+7. validate the consolidated release before beginning Debian 11.
+
+Do not alter the historical DR database marker during faithful 7393
+validation. Its correct value remains:
+
+``` text
+1.8.2.1
+```
+
+## 26. Exact next action
+
+The historical 7393 disaster-recovery path is now validated end-to-end.
+
+The next Debian 10 milestone is:
+
+``` text
+RESTORE FROM AN EVOLVED 7398 MIGRATION BACKUP
+```
+
+Proceed in this order:
+
+``` text
+1. Commit/push this checkpoint while preserving the current validated lab state.
+2. Validate restoration from a post-migration/evolved 7398 backup.
+3. Derive the final reproducible backup + fresh-install + restore procedure.
+4. Incorporate the repository exclusion rule for target Setup/Deploy.
+5. Make Agent regeneration an explicit post-restore administrative step.
+6. Review remaining non-system PostgreSQL object ownership/ACLs for robustness.
+7. Freeze the Debian 10 DR procedure.
+8. Consolidate the validated lineages into the planned 1.8.3.1 release.
+9. Only then begin Debian 11.
+```
+
+Do not begin Debian 11 yet.
+
+## 27. Resume protocol for a new ChatGPT thread
 
 Attach this checkpoint and send:
 
