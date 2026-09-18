@@ -1843,42 +1843,375 @@ validation. Its correct value remains:
 1.8.2.1
 ```
 
-## 26. Exact next action
+## 26. Post-DR backup/restore tooling — current state (2026-09-18)
 
-The historical 7393 disaster-recovery path is now validated end-to-end.
+The historical 7393 disaster-recovery path and authentic Windows client
+7393 -> 7402 migration are closed and validated. The strategy was revised:
+do **not** immediately reset `wapt-deb10` merely to repeat a restore from an
+evolved 7398 backup before the final DR mechanism exists.
 
-The next Debian 10 milestone is:
+The new order is:
 
 ``` text
-RESTORE FROM AN EVOLVED 7398 MIGRATION BACKUP
+historical 7393 DR validation
+    -> reproducible autonomous DR backup/restore tooling
+    -> end-to-end validation of that final mechanism with an evolved 7398 backup
+    -> freeze Debian 10 DR
+    -> consolidate 1.8.3.1
+    -> Debian 11
+```
+
+Keep the current validated `wapt-deb10` state until the restore mechanism is
+ready for its final validation.
+
+### 26.1 DR backup/restore architecture
+
+The existing migration script V1.0 remains frozen. Generic DR tooling is
+separate:
+
+``` text
+tools/waptserver-backup.sh
+future: tools/waptserver-restore.sh
+future: higher-level administrative orchestrator if useful
+```
+
+Administrative scripts requiring root follow this convention:
+
+``` text
+already root -> continue unchanged
+non-root + sudo -> re-exec through sudo preserving arguments
+sudo unavailable/refused -> stop before modifications
+```
+
+Do not modify the frozen migration V1.0 merely to retrofit this convention.
+
+The DR bundle format is versioned independently:
+
+``` text
+BACKUP_FORMAT_VERSION="1"
+```
+
+A backup with repository included contains conceptually:
+
+``` text
+wapt-dr-<hostname>-<timestamp>/
+├── manifest.ini
+├── SHA256SUMS
+├── database/wapt.dump
+├── config/waptserver.ini
+├── config/nginx/wapt.conf
+├── certificates/client-ca/
+├── certificates/server-tls/
+├── repository/wapt/
+└── metadata/
+    ├── system.txt
+    ├── packages.txt
+    ├── database.txt
+    ├── repository.txt
+    └── repository-manifest.sha256
+```
+
+Repository content is included by default by the `backup` mode and can be
+omitted explicitly with `backup-no-repository`. Even when omitted, a per-file
+SHA256 repository manifest is retained.
+
+The administrator-visible backup consists of:
+
+``` text
+wapt-dr-<hostname>-<timestamp>.tar
+wapt-dr-<hostname>-<timestamp>.tar.sha256
+```
+
+The SHA256 sidecar is deliberately retained because it permits immediate
+integrity verification after transport or archival.
+
+Backup-bundle security is independent of historical source permissions:
+
+``` text
+bundle directories: 0700 root:root
+bundle files:       0600 root:root
+final tar:          0600 root:root
+SHA256 sidecar:     0600 root:root
+```
+
+The backup preserves historical repository content faithfully. Selective
+modern target policy belongs to restore, not backup.
+
+### 26.2 Restore policy already decided
+
+The future restore tool must preserve target-version authority where
+appropriate.
+
+Historical repository restore must **not** overwrite the active files owned by
+the target `tis-waptsetup` package:
+
+``` text
+/var/www/wapt/waptsetup-tis.exe
+/var/www/wapt/waptdeploy.exe
+```
+
+Historical `waptagent.exe` may exist in the restored repository, but the final
+administrative procedure must explicitly require regeneration of the agent
+from the target/current console after trust has been reviewed.
+
+Historical nginx configuration in the backup is reference material; restore
+must not blindly overwrite the target nginx configuration.
+
+`waptserver.ini` must also be restored selectively rather than blindly:
+historical identity/policy values must be retained while target runtime/path
+settings remain authoritative.
+
+The historical package-signing private key remains an external
+administrator/console asset and is not a WAPT server-backup payload.
+
+The historical package prefix must be recorded and surfaced to the
+administrator. Current historical value:
+
+``` text
+0790007d
+```
+
+Final operational repository permission policy planned for 1.8.3.1:
+
+``` text
+directories: 0750 wapt:www-data
+files:       0640 wapt:www-data
+```
+
+Restore must reapply deliberate operational permissions rather than reproduce
+the historical 0640/0644 mixture.
+
+### 26.3 PostgreSQL restore contract
+
+Source PostgreSQL version and port are **metadata**, not target configuration.
+
+The restore tool must detect and use the target PostgreSQL runtime/cluster and
+port. It must never restore the source PostgreSQL port or cluster configuration
+blindly.
+
+Example:
+
+``` text
+source: PostgreSQL 9.6 / port 5432
+target: PostgreSQL 18 / port 5433
+
+=> logical WAPT database restore targets PostgreSQL 18 / port 5433
+```
+
+Cross-major logical restoration still requires explicit compatibility
+validation for extensions, data types and other PostgreSQL objects before it
+can be guaranteed.
+
+The validated historical database restoration rules remain:
+
+``` text
+create target DB owned by wapt
+remove default public schema before pg_restore
+pg_restore --no-owner as PostgreSQL superuser
+targeted ownership correction for WAPT tables/sequences
+GRANT USAGE, CREATE ON SCHEMA public TO wapt
+```
+
+Never globally `REASSIGN OWNED BY postgres TO wapt`.
+
+### 26.4 `waptserver-backup.sh` development and validation
+
+The standalone backup tool was developed incrementally on the isolated
+`scrab-clone`.
+
+Important milestones:
+
+``` text
+V0.1    precheck validated
+V0.2    backup-no-repository introduced; PostgreSQL protected-directory issue found
+V0.2.1  PostgreSQL dump fixed; real no-repository backup passed
+V0.3    secure bundle normalization, repository SHA manifest, package-prefix detection
+V0.3.1  neutral PostgreSQL working directory; clean no-repository backup passed
+V0.4.x  final tar archive + repository-included mode + staging cleanup
+V0.4.3  staging moved to backup filesystem + free-space preflight
+```
+
+A failed full-backup attempt while staging under `/tmp` filled the root
+filesystem during repository copy. It was a controlled, source-safe failure
+and exposed an architectural defect. The final design stages under the backup
+destination filesystem, never inside the source repository.
+
+For a full repository backup, free-space preflight requires:
+
+``` text
+2 * repository_size + 2 GiB safety margin
+```
+
+The factor 2 accounts for the repository staging copy plus the final tar.
+
+### 26.5 Full V0.4.3 validation — PASS
+
+The full backup was validated on `scrab-clone` against the real historical
+repository.
+
+Source characteristics:
+
+``` text
+server:              tis-waptserver 1.8.2.7398-88170eee-debian-10-amd64
+database:            PostgreSQL 9.6 / port 5432
+DB marker:           1.8.2.1
+repository files:    847
+repository bytes:    13246063582
+historical prefix:   0790007d
+```
+
+Controlled database counts during the backup validation:
+
+``` text
+hostgroups:          3623
+hostpackagesstatus:  25101
+hosts:               675
+hostsoftwares:       105247
+packages:            1056
+waptusers:           1
+```
+
+The `hostpackagesstatus` difference from the original 25099 baseline is
+expected laboratory activity after restoration/migration, not backup
+corruption.
+
+Free-space preflight:
+
+``` text
+available bytes: 49810874368
+required bytes:  28639610812
+```
+
+The repository copy was verified against its 847-entry SHA256 manifest before
+archive creation.
+
+Final validated archive:
+
+``` text
+/var/www/wapt-backups/wapt-dr-scrab-clone-20260918-123430.tar
+```
+
+SHA256:
+
+``` text
+a8809c603e377ec643cdfb44405179111a97bc4a410968132a638d4aedbe146b
+```
+
+Independent post-run validation confirmed:
+
+``` text
+archive exists and is readable
+tar structure is valid
+repository is included
+temporary staging directory is absent
+/var/www has 35 GiB free after completion
+```
+
+The repository SHA manifest generated independently by the backup tool again
+matched the previously proven historical repository manifest:
+
+``` text
+8a67e8518ff96b47e40ac1c101c38113173183b67ed09ceafb91a0d86b725f67
+```
+
+### 26.6 Backup V1.0 — FROZEN
+
+After full V0.4.3 validation, the script was promoted to:
+
+``` text
+tools/waptserver-backup.sh
+SCRIPT_VERSION="1.0"
+```
+
+There was **no functional code change** between the validated V0.4.3 and V1.0;
+only the script-version value changed.
+
+V0.4.3 SHA256:
+
+``` text
+19bfa8ca8b277b4cd5e7bf8212e667c0ccc8f2155606ee1f29d4a5e8564d7490
+```
+
+V1.0 SHA256:
+
+``` text
+db8f75aa04fad3e7aa1419e446ddcf3fa19716565237e9ef3a7bde3a5fd8eede
+```
+
+`bash -n` passed.
+
+Wapster commit:
+
+``` text
+226b2cc1 Add validated WAPT server DR backup tool
+branch: build/debian10-buster
+```
+
+The authoritative checkpoint is **not** the untracked copy on Wapster.
+The checkpoint reference remains the tracked file on VM106
+`C:\git\waptdev\WAPT_CHECKPOINT.md`, updated from this document at major
+milestones.
+
+At the time of the V1.0 backup commit, Wapster working-tree status was:
+
+``` text
+?? WAPT_CHECKPOINT.md
+```
+
+The untracked Wapster checkpoint is an older duplicate and must not be
+accidentally committed.
+
+## 27. Exact next action
+
+The historical 7393 DR path is closed and `waptserver-backup.sh` V1.0 is now
+validated/frozen.
+
+The immediate milestone is:
+
+``` text
+DESIGN AND IMPLEMENT THE REPRODUCIBLE WAPT SERVER RESTORE TOOL
 ```
 
 Proceed in this order:
 
 ``` text
-1. Commit/push this checkpoint while preserving the current validated lab state.
-2. Validate restoration from a post-migration/evolved 7398 backup.
-3. Derive the final reproducible backup + fresh-install + restore procedure.
-4. Incorporate the repository exclusion rule for target Setup/Deploy.
-5. Make Agent regeneration an explicit post-restore administrative step.
-6. Review remaining non-system PostgreSQL object ownership/ACLs for robustness.
-7. Freeze the Debian 10 DR procedure.
-8. Consolidate the validated lineages into the planned 1.8.3.1 release.
-9. Only then begin Debian 11.
+1. Commit/push the updated authoritative checkpoint separately from Wapster work.
+2. Design `tools/waptserver-restore.sh` around BACKUP_FORMAT_VERSION=1.
+3. Implement non-destructive validation/check mode first.
+4. Implement safety backup + controlled restore sequencing.
+5. Restore the logical WAPT DB into the detected target PostgreSQL runtime/port.
+6. Restore historical identity/config selectively.
+7. Restore repository while preserving target waptsetup-tis.exe/waptdeploy.exe.
+8. Reapply deliberate target operational permissions.
+9. Produce an explicit post-restore administrative report:
+   - historical package signer/private key reminder;
+   - authorized certificate review;
+   - historical package-prefix verification;
+   - regenerate waptagent.exe;
+   - generate/publish the current <prefix>-waptupgrade package;
+   - test at least one historical client.
+10. Use an evolved 7398 backup as the end-to-end validation of the final DR mechanism.
+11. Freeze the Debian 10 DR procedure only after that PASS.
+12. Consolidate the validated lineages into release 1.8.3.1.
+13. Only then begin Debian 11.
 ```
+
+Do not reset the currently validated `wapt-deb10` merely to perform another
+manual restore before the final restore mechanism exists.
 
 Do not begin Debian 11 yet.
 
-## 27. Resume protocol for a new ChatGPT thread
+## 28. Resume protocol for a new ChatGPT thread
 
 Attach this checkpoint and send:
 
 ``` text
-Gipity, on reprend le projet WAPT 1.8.2 Ã  partir du checkpoint joint.
-ConsidÃ¨re WAPT_CHECKPOINT.md comme l'Ã©tat technique faisant autoritÃ©.
-Ne recommence pas les investigations dÃ©jÃ  validÃ©es sauf si une contradiction apparaÃ®t.
-On reprend Ã  la section "Exact next action".
-RÃ©ponses courtes, une Ã©tape Ã  la fois.
+Gipity, on reprend le projet WAPT à partir du checkpoint joint.
+Considère WAPT_CHECKPOINT.md comme l'état technique faisant autorité.
+Ne recommence pas les investigations déjà validées sauf si une contradiction apparaît.
+On reprend à la section "Exact next action".
+Réponses courtes, une étape à la fois.
 ```
 
-If later work contradicts this file, update the checkpoint at the next major milestone instead of silently rewriting history.
+If later work contradicts this file, update the checkpoint at the next major
+milestone instead of silently rewriting history.
