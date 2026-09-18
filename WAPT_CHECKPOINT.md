@@ -2215,3 +2215,198 @@ Réponses courtes, une étape à la fois.
 
 If later work contradicts this file, update the checkpoint at the next major
 milestone instead of silently rewriting history.
+
+## 29. DR restore check tooling — validated milestone (2026-09-18)
+
+Development of `tools/waptserver-restore.sh` began with a deliberately
+non-destructive `--check` mode. No target WAPT database, configuration,
+repository or services are modified by this mode.
+
+The first validation exposed an important staging constraint: extracting a
+repository-bearing DR bundle under `/tmp` can exhaust the root filesystem.
+On `scrab-clone`, `/` had only about 6 GiB free while `/var/www` had about
+35 GiB free. Restore-check staging was therefore moved to:
+
+``` text
+/var/www
+```
+
+The check now performs a free-space preflight before full extraction using:
+
+``` text
+required = archive size + 2 GiB safety margin
+```
+
+For the validated archive:
+
+``` text
+archive:
+  /var/www/wapt-backups/wapt-dr-scrab-clone-20260918-123430.tar
+
+archive size:
+  13264957440 bytes
+
+free space:
+  36545908736 bytes
+
+required:
+  15412441088 bytes
+```
+
+The manifest parser was also simplified for compatibility with the Debian 10
+AWK environment and the controlled format-1 INI syntax. The validated parser
+reads values such as `format_version` directly from the `key = value` fields.
+
+### 29.1 Full `--check` validation — PASS
+
+The final check run on `scrab-clone` completed successfully:
+
+``` text
+WAPT Server DR restore check v0.1.5
+CHECK PASSED
+No target WAPT data was modified.
+```
+
+Validated controls:
+
+``` text
+archive present/non-empty:             PASS
+archive SHA256 sidecar:                PASS
+tar readability:                       PASS
+archive path traversal protection:     PASS
+single bundle root:                    PASS
+manifest format precheck:              PASS
+/var/www free-space preflight:         PASS
+full bundle extraction:                PASS
+required bundle files:                 PASS
+BACKUP_FORMAT_VERSION=1:               PASS
+mandatory identity files:              PASS
+repository manifest SHA256:            PASS
+repository per-file SHA256 (847):      PASS
+bundle SHA256SUMS:                      PASS
+PostgreSQL dump readable by pg_restore: PASS
+```
+
+Source metadata recovered correctly by the restore checker:
+
+``` text
+hostname:               scrab-clone
+FQDN:                   scrab-clone.genevoix-signoret-vinci.fr.lan
+Debian:                 10
+WAPT server:            1.8.2.7398-88170eee-debian-10-amd64
+DB marker:              "1.8.2.1"
+source PostgreSQL:      9.6
+source PostgreSQL port: 5432 (metadata only)
+package prefix:         0790007d
+repository included:    yes
+repository files:       847
+```
+
+The exact script that passed this validation was frozen as a reference on
+`scrab-clone`, transferred bit-for-bit through VM106 and then installed in
+the Wapster development tree.
+
+Validated script SHA256:
+
+``` text
+7fc62c4dd46e42bf9ea4daff7cf229e5d8732837bb3430d35d88cf91e09b5b88
+```
+
+Wapster commit:
+
+``` text
+faf4335b Add validated WAPT server DR restore check
+branch: build/debian10-buster
+```
+
+The branch was pushed successfully:
+
+``` text
+cc96ac9f..faf4335b  build/debian10-buster -> build/debian10-buster
+```
+
+This push also publishes the previously committed backup V1.0 milestone:
+
+``` text
+226b2cc1 Add validated WAPT server DR backup tool
+```
+
+Wapster remains clean for tracked files; its old duplicate checkpoint remains
+untracked and must not be committed:
+
+``` text
+?? WAPT_CHECKPOINT.md
+```
+
+VM106 remains the authoritative checkpoint working tree. Its intentional
+`submodules/pltis_synapse` modification must remain untouched.
+
+### 29.2 Restore development status
+
+`tools/waptserver-restore.sh` is **not V1.0 yet**. Version 0.1.5 validates only
+the non-destructive archive/check path. Do not promote it to V1.0 until the
+actual controlled restore path has been implemented and validated end-to-end.
+
+The next implementation phase must add the real restore sequencing while
+preserving all policies already established in sections 24–27:
+
+``` text
+1. detect/validate target environment and target PostgreSQL runtime/port;
+2. create a safety backup before modifications;
+3. stop WAPT services in controlled order;
+4. restore the logical WAPT database into the target PostgreSQL runtime;
+5. apply targeted WAPT ownership and public-schema ACL;
+6. selectively restore historical identity/policy configuration;
+7. restore historical CA/TLS identity;
+8. restore repository while preserving target:
+     waptsetup-tis.exe
+     waptdeploy.exe
+9. reapply deliberate operational permissions;
+10. restart and validate PostgreSQL/WAPT/nginx services and HTTPS;
+11. emit an explicit post-restore administrative report covering:
+     historical package-signing private key;
+     authorized certificate review;
+     package prefix;
+     regeneration of waptagent.exe;
+     generation/publication of current <prefix>-waptupgrade;
+     validation with at least one historical client.
+```
+
+The first real destructive validation must remain isolated and must never
+target the true production `scrab`.
+
+## 30. Exact next action
+
+The current immediate milestone is now:
+
+``` text
+IMPLEMENT THE CONTROLLED --restore PATH IN tools/waptserver-restore.sh
+```
+
+The archive/check layer is validated and committed. Continue development from
+commit:
+
+``` text
+faf4335b
+```
+
+Do not redo the validated `--check` investigation unless a contradiction
+appears. Develop the destructive restore path incrementally, preserve the
+existing safety checks, and keep the script in the 0.x development series
+until a complete real DR restore passes.
+
+After the real restore mechanism is validated:
+
+``` text
+evolved 7398 backup
+    -> validated restore tool
+    -> complete reconstructed target validation
+    -> historical client validation
+    -> freeze restore V1.0
+    -> freeze Debian 10 DR
+    -> consolidate release 1.8.3.1
+    -> Debian 11
+```
+
+Do not begin Debian 11 yet.
+
