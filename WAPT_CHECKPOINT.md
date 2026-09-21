@@ -3181,3 +3181,509 @@ target waptsetup-tis.exe and waptdeploy.exe remain authoritative
 Wapster's untracked WAPT_CHECKPOINT.md is not authoritative
 VM106 C:\git\waptdev\WAPT_CHECKPOINT.md remains authoritative
 ```
+## 37. Selective configuration / identity restore — V0.5.1 validated (2026-09-21)
+
+Restore development continued from the validated V0.4.4 database barrier.
+
+V0.5.1 added resume-aware selective restoration of WAPT configuration and
+identity. Its validated SHA256 is:
+
+``` text
+0c30658dc7ec00725158c4ed5be3b69517fdfa93648158fa4e8c5e9cf689af70
+```
+
+The restore state machine now distinguishes:
+
+``` text
+normal
+interrupted-empty
+interrupted-partial
+post-database
+```
+
+A `post-database` state is accepted only when the restored database matches the
+source logical signature: DB marker, database/schema ownership and ACL, zero
+non-WAPT-owned application tables/sequences, and exact controlled source table
+counts. In that state the destructive database replacement is skipped.
+
+On the already restored `wapt-deb10`, V0.5.1 correctly detected:
+
+``` text
+post-database
+DATABASE RESTORE SKIPPED
+```
+
+and created a fresh lightweight safety backup:
+
+``` text
+/var/www/wapt-backups/wapt-target-safety-wapt-deb10-20260921-110332.tar
+```
+
+### 37.1 Selective `waptserver.ini` authority
+
+Target runtime/technical values remain authoritative, including:
+
+``` text
+chdir
+gid
+http-socket
+processes
+uid
+wapt_folder
+wapt_huey_db
+wapt_user
+waptwua_folder
+wsgi
+master
+enable-threads
+max-requests
+```
+
+Historical identity/policy values are restored deliberately, including:
+
+``` text
+server_uuid
+secret_key
+wapt_password
+allow_unauthenticated_connect
+allow_unauthenticated_registration
+clients_signing_certificate
+clients_signing_key
+```
+
+Validated restored identity/policy included:
+
+``` text
+server_uuid = 39904430-d99a-11e7-ae3b-0208840a277e
+allow_unauthenticated_connect = False
+allow_unauthenticated_registration = True
+clients_signing_key = /opt/wapt/conf/ca-scrab.genevoix-signoret-vinci.fr.lan.pem
+clients_signing_certificate = /opt/wapt/conf/ca-scrab.genevoix-signoret-vinci.fr.lan.crt
+```
+
+Historical client-CA material and historical server TLS material were restored.
+The target nginx configuration remained authoritative and was not replaced.
+
+Validated permission policy:
+
+``` text
+/opt/wapt/conf:                 0750 wapt:root
+waptserver.ini:                 0640
+client CA certificate:          0644
+client CA private key:          0640
+server TLS directory:           0750 root:root
+server TLS certificate:         0644
+server TLS private key:         0600
+```
+
+The historical server TLS certificate is self-signed and has:
+
+``` text
+CN = scrab.genevoix-signoret-vinci.fr.lan
+notBefore = Dec 5 08:56:54 2017 GMT
+notAfter  = Dec 3 08:56:54 2027 GMT
+```
+
+Preserve this certificate for faithful DR. Plan and validate renewal/replacement
+for the same WAPT service FQDN before **2027-12-03**. Do not confuse this HTTPS
+server certificate with the WAPT client-signing CA or the external package
+signing certificate/private key.
+
+At this stage `waptserver` and `wapttasks` intentionally remained stopped.
+
+## 38. Historical repository restore — V0.6.2 validated and committed (2026-09-21)
+
+Repository restoration was implemented while preserving the target-version
+files owned by `tis-waptsetup`:
+
+``` text
+/var/www/wapt/waptsetup-tis.exe
+/var/www/wapt/waptdeploy.exe
+```
+
+A V0.6.1 run restored the repository correctly but its final manifest
+validation reported exactly two mismatches because the manifest filter did not
+normalize `./` paths correctly. Diagnostics proved that the only mismatches
+were the two intentionally preserved target executables; the 13 GiB historical
+repository itself was not corrupted.
+
+V0.6.2 corrected the manifest filtering and added a resume check that avoids
+copying the 13 GiB payload again when the target already matches the source
+except for those two preserved files.
+
+Validated V0.6.2 SHA256:
+
+``` text
+63c67f60a7b232e1f77c6b01781503f3b4098ec9eb81896cea55598d1505b610
+```
+
+Validated result:
+
+``` text
+repository files: 847
+Packages SHA256:
+fbcb45ba5eca2ec6d2f183e951ffcdbe8ad9686d811bd4b1bc4f36f67ab364b1
+
+preserved waptsetup-tis.exe SHA256:
+add5fc3f6d81e394fd821eaa3ac7a3d3543da9438c2aa474faae2b95dd41083c
+
+preserved waptdeploy.exe SHA256:
+c2c05314c9dbb8cf2118257c66d4cbd0fa6f75705d337b4131126552ed1a138d
+```
+
+Operational repository permissions were reapplied as:
+
+``` text
+directories: 0750 wapt:www-data
+files:       0640 wapt:www-data
+```
+
+The exact validated repository phase was committed and pushed on
+`build/debian10-buster`:
+
+``` text
+74bbf2ae Add validated WAPT repository restore phase
+```
+
+At this barrier:
+
+``` text
+database:          restored/validated
+config/identity:   restored/validated
+repository:        restored/validated
+PostgreSQL/nginx:  active
+waptserver:        intentionally stopped
+wapttasks:         intentionally stopped
+```
+
+## 39. Service / FQDN / TLS validation — V0.7.2 PASS (2026-09-21)
+
+The final automated restore phase added controlled service startup and explicit
+WAPT service-identity validation.
+
+An important architectural distinction was proven:
+
+``` text
+source OS FQDN:    scrab-clone.genevoix-signoret-vinci.fr.lan
+WAPT service FQDN: scrab.genevoix-signoret-vinci.fr.lan
+target OS FQDN:    wapt-deb10.genevoix-signoret-vinci.fr.lan
+```
+
+The source OS hostname is **not** the WAPT service identity. For this historical
+backup format the WAPT service FQDN is derived from the restored TLS
+certificate CN.
+
+V0.7.1 first validated TLS key/certificate matching, certificate validity,
+nginx configuration, and service startup. Its first local HTTPS test returned
+HTTP 502 immediately after systemd reported `waptserver` active. Diagnostics
+showed:
+
+``` text
+nginx proxy target: 127.0.0.1:8080
+waptserver listener: 127.0.0.1:8080
+```
+
+and the same HTTPS request returned HTTP 200 shortly afterward. This proved a
+startup-readiness race rather than a broken proxy/backend configuration.
+
+V0.7.2 replaced the one-shot HTTPS test with a bounded application-readiness
+loop of up to 30 seconds.
+
+Validated V0.7.2 SHA256:
+
+``` text
+69f93032461f7ca2372377bae77d13b6898237a2110e4eb353b8d419a0a9b566
+```
+
+Final automated validation result:
+
+``` text
+restored TLS certificate/private key match: PASS
+restored TLS certificate currently valid:  PASS
+nginx configuration test:                  PASS
+waptserver active:                         PASS
+wapttasks active:                          PASS
+local HTTPS through historical FQDN:       HTTP 200
+repository validation:                     PASS
+```
+
+The restore reported:
+
+``` text
+RESTORE VALIDATION PASSED
+Database, configuration/identity, repository, TLS identity and local WAPT
+service startup are validated.
+```
+
+The exact validated script was committed and pushed:
+
+``` text
+bb05f691 Complete validated WAPT server DR restore
+branch: build/debian10-buster
+```
+
+The restore tool remains versioned:
+
+``` text
+tools/waptserver-restore.sh
+SCRIPT_VERSION="0.7.2"
+```
+
+Do not silently call it V1.0 yet. Promotion/freezing as Restore V1.0 is a
+separate explicit release action.
+
+## 40. WAPT DR architecture — service identity transplant
+
+The validated DR model is now explicitly:
+
+``` text
+transplant the logical WAPT service identity and data
+onto a fresh supported target OS installation
+```
+
+It is **not** a requirement to clone the original Linux machine identity.
+
+The critical continuity objects are:
+
+``` text
+WAPT database
+server_uuid
+secret_key
+wapt_password
+historical identity/policy configuration
+client CA certificate/private key where applicable
+server HTTPS/TLS certificate/private key
+historical repository and Packages index
+package-prefix continuity
+authorized package-certificate policy
+```
+
+The administrator's historical WAPT package-signing private key is a separate
+external administrative asset and is not expected inside the WAPT server
+backup.
+
+### 40.1 FQDN, hostname and IP rules
+
+The historical WAPT **service FQDN** must remain stable from the clients'
+perspective:
+
+``` text
+scrab.genevoix-signoret-vinci.fr.lan
+```
+
+The target Linux hostname does not need to be identical to the historical OS
+hostname. The validated laboratory target proves that
+`wapt-deb10.genevoix-signoret-vinci.fr.lan` can host the restored logical
+`scrab` WAPT identity.
+
+The IP address is likewise not intrinsically part of WAPT service identity.
+A replacement server may use a different IP if production DNS maps the
+historical WAPT service FQDN to the intended restored server and firewall/ACL
+rules permit the required traffic.
+
+Preserving the historical IP can still simplify environments where clients,
+firewalls or other infrastructure contain literal IP references, but this is
+an environmental compatibility issue rather than a WAPT identity requirement.
+
+Future backup-format evolution should record an explicit:
+
+``` text
+service_fqdn=
+```
+
+instead of requiring restore-time derivation from the TLS certificate CN.
+
+### 40.2 Mandatory pre-production cutover barrier
+
+The restore tool deliberately does **not** change production DNS or authorize
+production-client reconnection.
+
+Before cutover, explicitly validate:
+
+``` text
+1. historical WAPT service FQDN resolves to the intended restored server;
+2. network/firewall/ACL rules permit intended client traffic;
+3. TLS identity presented for that FQDN is the intended restored/renewed cert;
+4. authorized WAPT package certificates are reviewed;
+5. the intended external package-signing key/certificate is available;
+6. waptagent.exe is regenerated from the current console;
+7. the current <prefix>-waptupgrade package is generated/published;
+8. at least one historical client is validated before broad reconnection.
+```
+
+Current laboratory DNS resolution observed during V0.7.2:
+
+``` text
+scrab.genevoix-signoret-vinci.fr.lan -> 172.20.127.81
+```
+
+This was informational only and was not changed by the restore script.
+
+During service validation, some existing clients attempted connections and
+produced certificate-signature authentication failures. This does not invalidate
+the local restore PASS, but reinforces the requirement to keep production
+reconnection behind the explicit DNS/network/trust cutover barrier.
+
+## 41. Debian 10 DR status — automated restore milestone closed
+
+The following chain is now validated:
+
+``` text
+evolved WAPT 7398 Backup V1.0
+    -> format-1 archive + sidecar integrity validation
+    -> target precheck and dynamic PostgreSQL detection
+    -> lightweight target safety backup
+    -> logical DB restore / resume detection
+    -> targeted ownership + schema ACL repair
+    -> selective historical configuration/identity restore
+    -> historical CA/TLS restore
+    -> historical repository restore
+    -> preserve target waptsetup-tis.exe / waptdeploy.exe
+    -> operational permission normalization
+    -> controlled WAPT service startup
+    -> historical service-FQDN/TLS validation
+    -> local HTTPS HTTP 200
+    -> explicit pre-production cutover barrier
+```
+
+Together with the earlier manual historical DR and authentic VM104
+7393 -> 7402 client migration, this establishes a reproducible Debian 10 DR
+architecture.
+
+Frozen/validated backup tool:
+
+``` text
+tools/waptserver-backup.sh
+SCRIPT_VERSION="1.0"
+SHA256 db8f75aa04fad3e7aa1419e446ddcf3fa19716565237e9ef3a7bde3a5fd8eede
+commit 226b2cc1
+```
+
+Validated restore implementation:
+
+``` text
+tools/waptserver-restore.sh
+SCRIPT_VERSION="0.7.2"
+SHA256 69f93032461f7ca2372377bae77d13b6898237a2110e4eb353b8d419a0a9b566
+commit bb05f691
+```
+
+Do not rewrite the validated intermediate commits:
+
+``` text
+c7f98b36  target safety backup
+cbc158fc  logical database restore
+74bbf2ae  repository restore
+bb05f691  complete restore validation
+```
+
+## 42. Modernization roadmap — post Debian 10 DR
+
+The objective is to minimize the number of compatibility transitions required
+to move the nine historical Debian 10 / WAPT 1.8.2.7393 installations to a
+maintainable platform without breaking client/package continuity.
+
+Planned workstreams:
+
+``` text
+A. Close/freeze Debian 10 DR tooling and documentation.
+B. Consolidate the validated Windows and Debian lineages as WAPT 1.8.3.1.
+C. Validate real 7393 -> 1.8.3.1 server/client migration.
+D. Provide autonomous installation/distribution:
+     - synchronized Git/artifact path, and/or
+     - project-owned APT repository.
+E. Revisit final Windows Authenticode signing; keep lab signatures distinct
+   from production distribution trust.
+F. Implement explicit idempotent DB marker migration from 1.8.2.1 to at least
+   1.8.3.0 for the consolidated release.
+G. Validate Debian 10 -> Debian 11.
+H. Validate Debian 11 -> Debian 12.
+I. Evaluate direct restoration of a Debian 10 WAPT backup onto a fresh
+   Debian 12 target as a possible simpler migration path than chained
+   in-place OS upgrades.
+J. Inventory and modernize COTS/security dependencies:
+     Python runtime, OpenSSL, cryptography, mORMot, FPC/Lazarus and related
+     libraries/CVEs.
+K. Migrate the server from Python 2 to Python 3 with explicit compatibility
+   testing.
+L. Assess a later Python 3 Windows client migration separately from the
+   server migration; do not assume they must occur simultaneously.
+M. Maintain a compatibility matrix covering:
+     server version;
+     agent version;
+     console version;
+     package format/trust;
+     Python runtime;
+     Debian version;
+     PostgreSQL/database marker.
+N. Industrialize reproducible builds, automated validation, portable DR,
+   documentation and later CI/CD.
+```
+
+Do not decide the exact ordering of Python 3, Debian 12 and major COTS/OpenSSL
+changes until dependency/compatibility analysis is performed. Preserve the
+smallest safe number of intermediate releases.
+
+The first consolidated autonomous release remains:
+
+``` text
+1.8.3.1
+```
+
+The validated Windows 1.8.2.7402 artifacts remain signed with the temporary
+self-signed laboratory Authenticode certificate. Before final autonomous
+distribution, explicitly choose and validate the production signing strategy.
+
+## 43. Exact next action — new-thread resume point
+
+The automated restore itself is now validated through V0.7.2 / commit
+`bb05f691`.
+
+The next milestone is:
+
+``` text
+FREEZE THE DEBIAN 10 DR RESTORE TOOLING, THEN BEGIN 1.8.3.1 CONSOLIDATION
+```
+
+Resume in this order:
+
+``` text
+1. Review the validated V0.7.2 restore result and decide/promote the restore
+   script to V1.0 without functional changes if no further DR test is required.
+2. Commit/tag the frozen restore release explicitly.
+3. Freeze/document the complete Debian 10 Backup V1.0 + Restore V1.0 procedure.
+4. Preserve the pre-production FQDN/DNS/TLS/client-reconnection barrier.
+5. Record the TLS renewal deadline before 2027-12-03.
+6. Reunify the validated Debian and Windows source lineages.
+7. Prepare the first consolidated autonomous release as 1.8.3.1.
+8. Implement the explicit DB marker migration to at least 1.8.3.0.
+9. Build all server/setup/client artifacts from the common release state.
+10. Re-evaluate final Windows Authenticode signing.
+11. Validate authentic 7393 -> 1.8.3.1 migration.
+12. Only after the consolidated Debian 10 release is validated, begin the
+    Debian 11 phase.
+```
+
+Do not begin Debian 11 before the 1.8.3.1 consolidation milestone is closed.
+
+## 44. Resume protocol for the next ChatGPT thread
+
+Attach this checkpoint and send:
+
+``` text
+Gipity, on reprend le projet WAPT à partir du checkpoint joint.
+Considère WAPT_CHECKPOINT.md comme l'état technique faisant autorité.
+La restauration automatisée Debian 10 est validée jusqu'à V0.7.2,
+commit bb05f691.
+On reprend à la section "Exact next action".
+Réponses courtes, une étape à la fois.
+```
+
+VM106 remains the authoritative checkpoint working tree:
+
+``` text
+C:\git\waptdev\WAPT_CHECKPOINT.md
+```
+
+Wapster's untracked `WAPT_CHECKPOINT.md` remains an obsolete duplicate and
+must not be committed.
