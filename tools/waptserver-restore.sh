@@ -1,7 +1,7 @@
 #!/bin/bash
 set -u
 
-SCRIPT_VERSION="0.4.4"
+SCRIPT_VERSION="0.6.2"
 
 ok()   { echo "[ OK ] $*"; }
 warn() { echo "[WARN] $*" >&2; }
@@ -233,6 +233,321 @@ SQL
     ok "Restored database ownership, schema ACL, marker and essential tables validated"
 }
 
+
+metadata_value() {
+    file="$1"
+    key="$2"
+    sed -n -E "s/^${key}=(.*)$/\1/p" "$file" | head -n 1
+}
+
+validate_post_database_state() {
+    DB_METADATA="$BUNDLE/metadata/database.txt"
+    [ -f "$DB_METADATA" ] || return 1
+
+    POST_DB_MARKER="$(cd / && runuser -u postgres -- \
+        psql -p "$TARGET_PG_PORT" -d wapt -Atqc \
+        "SELECT value FROM serverattribs WHERE key='db_version';" 2>/dev/null)" || return 1
+    [ -n "$POST_DB_MARKER" ] || return 1
+    [ "$POST_DB_MARKER" = "$SOURCE_DB_MARKER" ] || return 1
+
+    POST_DB_OWNER="$(cd / && runuser -u postgres -- \
+        psql -p "$TARGET_PG_PORT" -d postgres -Atqc \
+        "SELECT pg_get_userbyid(datdba) FROM pg_database WHERE datname='wapt';" 2>/dev/null)" || return 1
+    [ "$POST_DB_OWNER" = "wapt" ] || return 1
+
+    POST_SCHEMA_ACL="$(cd / && runuser -u postgres -- \
+        psql -p "$TARGET_PG_PORT" -d wapt -Atqc \
+        "SELECT has_schema_privilege('wapt','public','USAGE')::int || '|' || has_schema_privilege('wapt','public','CREATE')::int;" 2>/dev/null)" || return 1
+    [ "$POST_SCHEMA_ACL" = "1|1" ] || return 1
+
+    NON_WAPT_TABLES="$(cd / && runuser -u postgres -- \
+        psql -p "$TARGET_PG_PORT" -d wapt -Atqc \
+        "SELECT count(*) FROM pg_tables WHERE schemaname='public' AND tableowner <> 'wapt';" 2>/dev/null)" || return 1
+    [ "$NON_WAPT_TABLES" = "0" ] || return 1
+
+    NON_WAPT_SEQUENCES="$(cd / && runuser -u postgres -- \
+        psql -p "$TARGET_PG_PORT" -d wapt -Atqc \
+        "SELECT count(*) FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='public' AND c.relkind='S' AND pg_get_userbyid(c.relowner) <> 'wapt';" 2>/dev/null)" || return 1
+    [ "$NON_WAPT_SEQUENCES" = "0" ] || return 1
+
+    for table in hostgroups hostpackagesstatus hosts hostsoftwares packages waptusers; do
+        expected="$(metadata_value "$DB_METADATA" "$table")"
+        case "$expected" in
+            ''|*[!0-9]*) return 1 ;;
+        esac
+        actual="$(cd / && runuser -u postgres -- \
+            psql -p "$TARGET_PG_PORT" -d wapt -Atqc \
+            "SELECT count(*) FROM public.${table};" 2>/dev/null)" || return 1
+        [ "$actual" = "$expected" ] || return 1
+    done
+
+    return 0
+}
+
+wapt_ini_value() {
+    file="$1"
+    key="$2"
+    sed -n -E "s/^[[:space:]]*${key}[[:space:]]*=[[:space:]]*(.*)$/\\1/p" "$file" | head -n 1
+}
+
+restore_target_configuration_identity() {
+    echo
+    echo "=================================================="
+    echo "CONFIGURATION / IDENTITY PHASE"
+    echo "=================================================="
+    echo "Restoring historical WAPT identity and policy while preserving target runtime settings."
+
+    TARGET_INI="/opt/wapt/conf/waptserver.ini"
+    SOURCE_INI="$BUNDLE/config/waptserver.ini"
+    [ -f "$TARGET_INI" ] || fail "Target waptserver.ini is missing: $TARGET_INI"
+    [ -f "$SOURCE_INI" ] || fail "Source waptserver.ini is missing from bundle"
+
+    MERGED_INI="$(mktemp /opt/wapt/conf/.waptserver.ini.restore.XXXXXX)" || \
+        fail "Unable to create temporary merged waptserver.ini"
+    cp -a "$TARGET_INI" "$MERGED_INI" || fail "Unable to seed merged waptserver.ini"
+
+    RESTORE_KEYS="allow_unauthenticated_connect allow_unauthenticated_registration clients_signing_certificate clients_signing_key secret_key server_uuid wapt_password"
+    for key in $RESTORE_KEYS; do
+        source_value="$(wapt_ini_value "$SOURCE_INI" "$key")"
+        [ -n "$source_value" ] || fail "Source waptserver.ini value missing: $key"
+        awk -v wanted="$key" -v value="$source_value" '
+            BEGIN { replaced=0 }
+            {
+                line=$0
+                split(line,a,"=")
+                lhs=a[1]
+                gsub(/^[ \t]+|[ \t]+$/, "", lhs)
+                if (lhs == wanted) {
+                    print wanted " = " value
+                    replaced=1
+                } else {
+                    print line
+                }
+            }
+            END { if (!replaced) exit 42 }
+        ' "$MERGED_INI" > "${MERGED_INI}.new" || {
+            rm -f -- "${MERGED_INI}.new" "$MERGED_INI"
+            fail "Unable to merge WAPT identity/policy key: $key"
+        }
+        mv "${MERGED_INI}.new" "$MERGED_INI" || fail "Unable to update merged waptserver.ini"
+    done
+
+    # Runtime/technical keys remain authoritative from the target installation.
+    RUNTIME_KEYS="chdir gid http-socket processes uid wapt_folder wapt_huey_db wapt_user waptwua_folder wsgi master enable-threads max-requests"
+    for key in $RUNTIME_KEYS; do
+        before="$(wapt_ini_value "$TARGET_INI" "$key")"
+        after="$(wapt_ini_value "$MERGED_INI" "$key")"
+        [ "$before" = "$after" ] || {
+            rm -f -- "$MERGED_INI"
+            fail "Target runtime setting changed unexpectedly during merge: $key"
+        }
+    done
+
+    SOURCE_CA_KEY="$BUNDLE/certificates/client-ca/$(basename "$CA_KEY")"
+    SOURCE_CA_CERT="$BUNDLE/certificates/client-ca/$(basename "$CA_CERT")"
+
+    MERGED_CA_KEY="$(wapt_ini_value "$MERGED_INI" clients_signing_key)"
+    MERGED_CA_CERT="$(wapt_ini_value "$MERGED_INI" clients_signing_certificate)"
+    [ -n "$MERGED_CA_KEY" ] || fail "Merged clients_signing_key is empty"
+    [ -n "$MERGED_CA_CERT" ] || fail "Merged clients_signing_certificate is empty"
+    case "$MERGED_CA_KEY" in /opt/wapt/conf/*) ;; *) fail "Refusing client signing key path outside /opt/wapt/conf: $MERGED_CA_KEY" ;; esac
+    case "$MERGED_CA_CERT" in /opt/wapt/conf/*) ;; *) fail "Refusing client signing certificate path outside /opt/wapt/conf: $MERGED_CA_CERT" ;; esac
+
+    TARGET_NGINX_CONF="/etc/nginx/sites-available/wapt.conf"
+    [ -f "$TARGET_NGINX_CONF" ] || fail "Target nginx WAPT configuration is missing: $TARGET_NGINX_CONF"
+    TARGET_TLS_CERT="$(sed -n -E 's/^[[:space:]]*ssl_certificate[[:space:]]+"?([^";]+)"?;.*/\1/p' "$TARGET_NGINX_CONF" | head -n 1)"
+    TARGET_TLS_KEY="$(sed -n -E 's/^[[:space:]]*ssl_certificate_key[[:space:]]+"?([^";]+)"?;.*/\1/p' "$TARGET_NGINX_CONF" | head -n 1)"
+    [ -n "$TARGET_TLS_CERT" ] || fail "Unable to determine target nginx TLS certificate path"
+    [ -n "$TARGET_TLS_KEY" ] || fail "Unable to determine target nginx TLS key path"
+    case "$TARGET_TLS_CERT" in /opt/wapt/waptserver/ssl/*) ;; *) fail "Refusing TLS certificate path outside /opt/wapt/waptserver/ssl: $TARGET_TLS_CERT" ;; esac
+    case "$TARGET_TLS_KEY" in /opt/wapt/waptserver/ssl/*) ;; *) fail "Refusing TLS key path outside /opt/wapt/waptserver/ssl: $TARGET_TLS_KEY" ;; esac
+
+    SOURCE_TLS_CERT="$BUNDLE/certificates/server-tls/$(basename "$TLS_CERT")"
+    SOURCE_TLS_KEY="$BUNDLE/certificates/server-tls/$(basename "$TLS_KEY")"
+
+    install -d -o wapt -g root -m 0750 /opt/wapt/conf || fail "Unable to secure /opt/wapt/conf"
+    install -d -o root -g root -m 0750 /opt/wapt/waptserver/ssl || fail "Unable to secure target TLS directory"
+
+    install -o wapt -g root -m 0640 "$SOURCE_CA_KEY" "$MERGED_CA_KEY" || fail "Unable to restore client signing key"
+    install -o wapt -g root -m 0644 "$SOURCE_CA_CERT" "$MERGED_CA_CERT" || fail "Unable to restore client signing certificate"
+    install -o root -g root -m 0644 "$SOURCE_TLS_CERT" "$TARGET_TLS_CERT" || fail "Unable to restore server TLS certificate"
+    install -o root -g root -m 0600 "$SOURCE_TLS_KEY" "$TARGET_TLS_KEY" || fail "Unable to restore server TLS key"
+
+    install -o wapt -g root -m 0640 "$MERGED_INI" "$TARGET_INI" || fail "Unable to install merged waptserver.ini"
+    rm -f -- "$MERGED_INI"
+
+    for key in $RESTORE_KEYS; do
+        source_value="$(wapt_ini_value "$SOURCE_INI" "$key")"
+        target_value="$(wapt_ini_value "$TARGET_INI" "$key")"
+        [ "$source_value" = "$target_value" ] || fail "Restored WAPT identity/policy value mismatch: $key"
+    done
+    for key in $RUNTIME_KEYS; do
+        [ -n "$(wapt_ini_value "$TARGET_INI" "$key")" ] || fail "Target runtime setting missing after merge: $key"
+    done
+
+    cmp -s "$SOURCE_CA_KEY" "$MERGED_CA_KEY" || fail "Restored client signing key content mismatch"
+    cmp -s "$SOURCE_CA_CERT" "$MERGED_CA_CERT" || fail "Restored client signing certificate content mismatch"
+    cmp -s "$SOURCE_TLS_CERT" "$TARGET_TLS_CERT" || fail "Restored TLS certificate content mismatch"
+    cmp -s "$SOURCE_TLS_KEY" "$TARGET_TLS_KEY" || fail "Restored TLS key content mismatch"
+
+    [ "$(stat -c '%a|%U|%G' "$TARGET_INI")" = "640|wapt|root" ] || fail "Unexpected waptserver.ini permissions"
+    [ "$(stat -c '%a|%U|%G' "$MERGED_CA_KEY")" = "640|wapt|root" ] || fail "Unexpected client signing key permissions"
+    [ "$(stat -c '%a|%U|%G' "$MERGED_CA_CERT")" = "644|wapt|root" ] || fail "Unexpected client signing certificate permissions"
+    [ "$(stat -c '%a|%U|%G' "$TARGET_TLS_KEY")" = "600|root|root" ] || fail "Unexpected TLS key permissions"
+    [ "$(stat -c '%a|%U|%G' "$TARGET_TLS_CERT")" = "644|root|root" ] || fail "Unexpected TLS certificate permissions"
+
+    systemctl is-active --quiet waptserver && fail "waptserver unexpectedly active after configuration/identity restore"
+    systemctl is-active --quiet postgresql || fail "PostgreSQL unexpectedly inactive after configuration/identity restore"
+
+    echo
+    echo "Historical WAPT service FQDN: ${SOURCE_FQDN:-unknown}"
+    echo "Current OS hostname:           $(hostname -f 2>/dev/null || hostname)"
+    echo "Package prefix:                ${PACKAGE_PREFIX:-unknown} (informational; not changed by this phase)"
+    echo "Target nginx configuration:    preserved"
+    ok "WAPT configuration and identity restored and validated"
+}
+
+
+restore_target_repository() {
+    echo
+    echo "=================================================="
+    echo "REPOSITORY PHASE"
+    echo "=================================================="
+
+    [ "$REPO_INCLUDED" = "yes" ] || fail "Source backup does not contain repository payload"
+
+    SOURCE_REPO="$BUNDLE/repository/wapt"
+    TARGET_REPO="/var/www/wapt"
+    [ -d "$SOURCE_REPO" ] || fail "Source repository is missing from extracted bundle"
+    [ -d "$TARGET_REPO" ] || fail "Target repository is missing: $TARGET_REPO"
+
+    PRESERVE_SETUP="$TARGET_REPO/waptsetup-tis.exe"
+    PRESERVE_DEPLOY="$TARGET_REPO/waptdeploy.exe"
+    [ -f "$PRESERVE_SETUP" ] || fail "Target waptsetup-tis.exe is missing; refusing repository replacement"
+    [ -f "$PRESERVE_DEPLOY" ] || fail "Target waptdeploy.exe is missing; refusing repository replacement"
+
+    SETUP_SHA_BEFORE="$(sha256sum "$PRESERVE_SETUP" | awk '{print $1}')"
+    DEPLOY_SHA_BEFORE="$(sha256sum "$PRESERVE_DEPLOY" | awk '{print $1}')"
+
+    FILTERED_REPO_MANIFEST="$WORKDIR/repository-manifest.final.sha256"
+    awk '
+        {
+            path=$NF
+            sub(/^\*/, "", path)
+            sub(/^\.\//, "", path)
+            if (path != "waptsetup-tis.exe" && path != "waptdeploy.exe")
+                print $0
+        }
+    ' "$REPO_MANIFEST" > "$FILTERED_REPO_MANIFEST" || \
+        fail "Unable to build final repository validation manifest"
+
+    SOURCE_PRESERVED_ENTRIES="$(awk '
+        {
+            path=$NF
+            sub(/^\*/, "", path)
+            sub(/^\.\//, "", path)
+            if (path == "waptsetup-tis.exe" || path == "waptdeploy.exe")
+                n++
+        }
+        END { print n+0 }
+    ' "$REPO_MANIFEST")"
+    [ "$SOURCE_PRESERVED_ENTRIES" = "2" ] || \
+        fail "Expected exactly 2 setup/deploy entries in source repository manifest, got $SOURCE_PRESERVED_ENTRIES"
+
+    echo "Preserved waptsetup-tis.exe SHA256: $SETUP_SHA_BEFORE"
+    echo "Preserved waptdeploy.exe SHA256:    $DEPLOY_SHA_BEFORE"
+
+    REPOSITORY_ALREADY_RESTORED="no"
+    if (
+        cd "$TARGET_REPO" || exit 1
+        sha256sum -c "$FILTERED_REPO_MANIFEST"
+    ) >/dev/null 2>&1; then
+        REPOSITORY_ALREADY_RESTORED="yes"
+        warn "Repository payload already matches the source backup except for the two intentionally preserved target executables"
+        ok "Repository resume state accepted; 13 GB payload copy will be skipped"
+    fi
+
+    if [ "$REPOSITORY_ALREADY_RESTORED" = "no" ]; then
+        echo "Replacing historical repository payload while preserving target 7402 setup/deploy executables..."
+
+        # Keep the validated target executables physically in place. Everything else
+        # is recreated from the already-validated source repository.
+        find "$TARGET_REPO" -mindepth 1 -maxdepth 1 \
+            ! -name 'waptsetup-tis.exe' \
+            ! -name 'waptdeploy.exe' \
+            -exec rm -rf -- {} + || fail "Unable to clear target repository payload"
+
+        COPY_FIFO="$WORKDIR/repository-copy.fifo"
+        mkfifo "$COPY_FIFO" || fail "Unable to create repository copy FIFO"
+
+        (
+            cd "$TARGET_REPO" || exit 1
+            tar -xf "$COPY_FIFO"
+        ) &
+        REPO_EXTRACT_PID=$!
+
+        (
+            cd "$SOURCE_REPO" || exit 1
+            tar \
+                --exclude='./waptsetup-tis.exe' \
+                --exclude='./waptdeploy.exe' \
+                -cf "$COPY_FIFO" .
+        )
+        REPO_CREATE_RC=$?
+
+        wait "$REPO_EXTRACT_PID"
+        REPO_EXTRACT_RC=$?
+        rm -f -- "$COPY_FIFO"
+
+        [ "$REPO_CREATE_RC" -eq 0 ] || fail "Unable to read source repository payload"
+        [ "$REPO_EXTRACT_RC" -eq 0 ] || fail "Unable to extract repository payload into target"
+    fi
+
+    [ -f "$PRESERVE_SETUP" ] || fail "Preserved waptsetup-tis.exe disappeared during repository restore"
+    [ -f "$PRESERVE_DEPLOY" ] || fail "Preserved waptdeploy.exe disappeared during repository restore"
+
+    SETUP_SHA_AFTER="$(sha256sum "$PRESERVE_SETUP" | awk '{print $1}')"
+    DEPLOY_SHA_AFTER="$(sha256sum "$PRESERVE_DEPLOY" | awk '{print $1}')"
+    [ "$SETUP_SHA_AFTER" = "$SETUP_SHA_BEFORE" ] || fail "waptsetup-tis.exe changed during repository restore"
+    [ "$DEPLOY_SHA_AFTER" = "$DEPLOY_SHA_BEFORE" ] || fail "waptdeploy.exe changed during repository restore"
+
+    chown -R wapt:www-data "$TARGET_REPO" || fail "Unable to set repository ownership"
+    find "$TARGET_REPO" -type d -exec chmod 0750 {} + || fail "Unable to set repository directory permissions"
+    find "$TARGET_REPO" -type f -exec chmod 0640 {} + || fail "Unable to set repository file permissions"
+
+    echo "Validating restored repository against source per-file SHA256 manifest..."
+    (
+        cd "$TARGET_REPO" || exit 1
+        sha256sum -c "$FILTERED_REPO_MANIFEST"
+    ) >/dev/null || fail "Final repository SHA256 validation failed"
+
+    SETUP_SHA_FINAL="$(sha256sum "$PRESERVE_SETUP" | awk '{print $1}')"
+    DEPLOY_SHA_FINAL="$(sha256sum "$PRESERVE_DEPLOY" | awk '{print $1}')"
+    [ "$SETUP_SHA_FINAL" = "$SETUP_SHA_BEFORE" ] || fail "Final waptsetup-tis.exe SHA256 mismatch"
+    [ "$DEPLOY_SHA_FINAL" = "$DEPLOY_SHA_BEFORE" ] || fail "Final waptdeploy.exe SHA256 mismatch"
+
+    FINAL_REPO_FILES="$(find "$TARGET_REPO" -type f | wc -l)"
+    EXPECTED_FINAL_REPO_FILES=$((REPO_FILES - SOURCE_PRESERVED_ENTRIES + 2))
+    [ "$FINAL_REPO_FILES" = "$EXPECTED_FINAL_REPO_FILES" ] || \
+        fail "Final repository file count mismatch: expected $EXPECTED_FINAL_REPO_FILES, got $FINAL_REPO_FILES"
+
+    [ -f "$TARGET_REPO/Packages" ] || fail "Restored repository Packages index is missing"
+    PACKAGES_SHA="$(sha256sum "$TARGET_REPO/Packages" | awk '{print $1}')"
+
+    [ "$(stat -c '%a|%U|%G' "$TARGET_REPO")" = "750|wapt|www-data" ] || \
+        fail "Unexpected repository root permissions"
+
+    systemctl is-active --quiet waptserver && fail "waptserver unexpectedly active after repository restore"
+    systemctl is-active --quiet postgresql || fail "PostgreSQL unexpectedly inactive after repository restore"
+
+    echo
+    echo "Repository files:             $FINAL_REPO_FILES"
+    echo "Packages SHA256:              $PACKAGES_SHA"
+    echo "Preserved waptsetup SHA256:   $SETUP_SHA_FINAL"
+    echo "Preserved waptdeploy SHA256:  $DEPLOY_SHA_FINAL"
+    ok "Historical repository restored and validated; target setup/deploy executables preserved"
+}
+
 usage() {
     echo "Usage: $0 {--check|--restore} /path/to/wapt-dr-*.tar"
     exit 2
@@ -262,7 +577,7 @@ else
 fi
 echo
 
-for tool in tar sha256sum awk grep sed find wc mktemp pg_restore df stat sort; do
+for tool in tar sha256sum awk grep sed find wc mktemp mkfifo pg_restore df stat sort install cmp hostname head; do
     command -v "$tool" >/dev/null 2>&1 || fail "Required tool missing: $tool"
     ok "Tool available: $tool"
 done
@@ -546,15 +861,27 @@ EOF
     TARGET_PG_PORT="$(printf '%s\n' "$TARGET_WAPT_CLUSTERS" | awk -F'|' 'NF {print $3; exit}')"
     TARGET_PG_OWNER="$(printf '%s\n' "$TARGET_WAPT_CLUSTERS" | awk -F'|' 'NF {print $5; exit}')"
 
+    RESTORE_STATE="normal"
     if [ "$TARGET_WAPTSERVER_ACTIVE" = "no" ]; then
         TARGET_PUBLIC_TABLE_COUNT="$(cd / && runuser -u postgres -- \
             psql -p "$TARGET_PG_PORT" -d wapt -Atqc \
             "SELECT count(*) FROM pg_tables WHERE schemaname='public';" \
             2>/dev/null)" || fail "Unable to assess interrupted-restore database state"
-        [ "$TARGET_PUBLIC_TABLE_COUNT" = "0" ] || \
-            fail "Target waptserver is inactive and database is not an empty interrupted-restore state (${TARGET_PUBLIC_TABLE_COUNT} public tables)"
-        warn "Interrupted restore state detected: waptserver inactive and target database has 0 public tables"
-        ok "Interrupted restore state accepted for controlled database restore resume"
+        if [ "$TARGET_PUBLIC_TABLE_COUNT" = "0" ]; then
+            RESTORE_STATE="interrupted-empty"
+            warn "Interrupted restore state detected: waptserver inactive and target database has 0 public tables"
+            ok "Interrupted empty state accepted; database restore will restart from scratch"
+        else
+            if validate_post_database_state; then
+                RESTORE_STATE="post-database"
+                warn "Post-database restore state detected: marker, ownership, ACL and source table counts all match"
+                ok "Post-database state accepted; destructive database restore will be skipped"
+            else
+                RESTORE_STATE="interrupted-partial"
+                warn "Interrupted partial restore state detected: waptserver inactive and database does not fully match source backup"
+                ok "Interrupted partial state accepted; database restore will restart from scratch"
+            fi
+        fi
     fi
 
     [ "$TARGET_PG_OWNER" = "postgres" ] || \
@@ -580,16 +907,26 @@ EOF
     [ "$TARGET_DB_OWNER" = "wapt" ] || \
         fail "Target WAPT database owner is not wapt: ${TARGET_DB_OWNER:-missing}"
 
-    if [ "$TARGET_WAPTSERVER_ACTIVE" = "yes" ]; then
-        TARGET_DB_MARKER="$(cd / && runuser -u postgres -- \
-            psql -p "$TARGET_PG_PORT" -d wapt -Atqc \
-            "SELECT value FROM serverattribs WHERE key='db_version';" \
-            2>/dev/null)" || fail "Unable to read target WAPT database marker"
-        [ -n "$TARGET_DB_MARKER" ] || fail "Target WAPT database marker is empty"
-    else
-        TARGET_DB_MARKER="<interrupted-empty>"
-        warn "Target DB marker check skipped for accepted empty interrupted-restore state"
-    fi
+    case "$RESTORE_STATE" in
+        normal)
+            TARGET_DB_MARKER="$(cd / && runuser -u postgres -- \
+                psql -p "$TARGET_PG_PORT" -d wapt -Atqc \
+                "SELECT value FROM serverattribs WHERE key='db_version';" \
+                2>/dev/null)" || fail "Unable to read target WAPT database marker"
+            [ -n "$TARGET_DB_MARKER" ] || fail "Target WAPT database marker is empty"
+            ;;
+        interrupted-empty)
+            TARGET_DB_MARKER="<interrupted-empty>"
+            warn "Target DB marker check skipped for accepted empty interrupted-restore state"
+            ;;
+        interrupted-partial)
+            TARGET_DB_MARKER="<interrupted-partial>"
+            warn "Target DB marker check skipped for accepted partial interrupted-restore state"
+            ;;
+        post-database)
+            TARGET_DB_MARKER="$POST_DB_MARKER"
+            ;;
+    esac
 
     echo
     echo "Target Debian:          $TARGET_DEBIAN"
@@ -600,6 +937,7 @@ EOF
     echo "Target PostgreSQL port: $TARGET_PG_PORT"
     echo "Target DB owner:        $TARGET_DB_OWNER"
     echo "Target DB marker:       $TARGET_DB_MARKER"
+    echo "Restore state:          $RESTORE_STATE"
     echo
     ok "Restore target precheck passed"
 fi
@@ -620,15 +958,39 @@ else
     echo
     echo "SAFETY BACKUP PASSED"
 
-    restore_target_database
+    if [ "$RESTORE_STATE" = "post-database" ]; then
+        echo
+        echo "DATABASE RESTORE SKIPPED"
+        echo "A validated post-database restore state was detected."
+        echo "The already-restored WAPT database will not be replaced again."
+    else
+        if [ "$RESTORE_STATE" = "interrupted-empty" ] || [ "$RESTORE_STATE" = "interrupted-partial" ]; then
+            echo
+            echo "DATABASE RESTORE RESUME"
+            echo "Interrupted database state detected; the target database will be recreated from scratch."
+        fi
+        restore_target_database
+        echo
+        echo "DATABASE RESTORE PASSED"
+        echo "The target WAPT database has been replaced and validated."
+    fi
+
+    restore_target_configuration_identity
 
     echo
-    echo "DATABASE RESTORE PASSED"
-    echo "The target WAPT database has been replaced and validated."
+    echo "CONFIGURATION / IDENTITY RESTORE PASSED"
+    echo "Historical WAPT identity and policy have been restored onto the target runtime."
+
+    restore_target_repository
+
+    echo
+    echo "REPOSITORY RESTORE PASSED"
+    echo "Historical repository payload and Packages index have been restored."
+    echo "Target waptsetup-tis.exe and waptdeploy.exe were preserved in place and SHA256-validated."
     echo "waptserver/wapttasks remain stopped intentionally."
-    echo "Target configuration, certificates, nginx configuration and repository were NOT replaced."
+    echo "Target nginx configuration was preserved."
     echo "Safety backup retained at: $SAFETY_ARCHIVE"
     echo
-    echo "STOP BARRIER: configuration/identity/repository restore is not implemented yet in v${SCRIPT_VERSION}."
+    echo "STOP BARRIER: service restart and FQDN/DNS/TLS cutover validation are not implemented yet in v${SCRIPT_VERSION}."
     exit 3
 fi
