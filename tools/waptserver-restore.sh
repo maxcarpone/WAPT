@@ -1,7 +1,7 @@
 #!/bin/bash
 set -u
 
-SCRIPT_VERSION="0.7.2"
+SCRIPT_VERSION="1.0"
 
 ok()   { echo "[ OK ] $*"; }
 warn() { echo "[WARN] $*" >&2; }
