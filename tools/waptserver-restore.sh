@@ -1,7 +1,7 @@
 #!/bin/bash
 set -u
 
-SCRIPT_VERSION="0.3.1"
+SCRIPT_VERSION="0.4.4"
 
 ok()   { echo "[ OK ] $*"; }
 warn() { echo "[WARN] $*" >&2; }
@@ -103,6 +103,134 @@ create_target_safety_backup() {
     ok "Target safety backup created and structurally validated"
     echo "Target safety backup: $SAFETY_ARCHIVE"
     echo "NOTE: repository package payload is not included in this safety backup."
+}
+
+restore_target_database() {
+    echo
+    echo "=================================================="
+    echo "DESTRUCTIVE DATABASE PHASE"
+    echo "=================================================="
+    echo "The target WAPT database will now be replaced."
+    echo "Safety backup retained at: $SAFETY_ARCHIVE"
+    echo
+
+    echo "Stopping WAPT application services..."
+    systemctl stop waptserver || fail "Unable to stop waptserver"
+
+    if systemctl cat wapttasks.service >/dev/null 2>&1; then
+        systemctl stop wapttasks || fail "Unable to stop wapttasks"
+        systemctl is-active --quiet wapttasks && fail "wapttasks is still active"
+    fi
+
+    systemctl is-active --quiet waptserver && fail "waptserver is still active"
+    systemctl is-active --quiet postgresql || fail "PostgreSQL unexpectedly became inactive"
+    ok "WAPT application services stopped; PostgreSQL remains active"
+
+    echo "Replacing target database wapt on PostgreSQL ${TARGET_PG_MAJOR}/${TARGET_PG_CLUSTER}, port ${TARGET_PG_PORT}..."
+
+    (cd / && runuser -u postgres -- \
+        dropdb -p "$TARGET_PG_PORT" --if-exists wapt) || \
+        fail "Unable to drop target WAPT database"
+
+    (cd / && runuser -u postgres -- \
+        createdb -p "$TARGET_PG_PORT" -O wapt -E UTF8 -T template0 wapt) || \
+        fail "Unable to recreate target WAPT database"
+
+    (cd / && runuser -u postgres -- \
+        psql -p "$TARGET_PG_PORT" -d wapt -v ON_ERROR_STOP=1 \
+        -c 'DROP SCHEMA public;') >/dev/null || \
+        fail "Unable to prepare target WAPT database schema"
+
+    cat "$BUNDLE/database/wapt.dump" | \
+        (cd / && runuser -u postgres -- \
+            pg_restore --exit-on-error --no-owner \
+            -p "$TARGET_PG_PORT" -d wapt) || \
+        fail "Database restore failed"
+
+    ok "Logical database restore completed"
+
+    echo "Applying targeted WAPT ownership and schema ACL corrections..."
+
+    (cd / && runuser -u postgres -- \
+        psql -p "$TARGET_PG_PORT" -d wapt -v ON_ERROR_STOP=1 <<'SQL'
+ALTER DATABASE wapt OWNER TO wapt;
+ALTER SCHEMA public OWNER TO wapt;
+GRANT USAGE, CREATE ON SCHEMA public TO wapt;
+
+DO $$
+DECLARE
+    obj record;
+BEGIN
+    FOR obj IN
+        SELECT schemaname, tablename
+        FROM pg_tables
+        WHERE schemaname = 'public'
+    LOOP
+        EXECUTE format('ALTER TABLE %I.%I OWNER TO wapt',
+                       obj.schemaname, obj.tablename);
+    END LOOP;
+
+    FOR obj IN
+        SELECT sequence_schema, sequence_name
+        FROM information_schema.sequences
+        WHERE sequence_schema = 'public'
+    LOOP
+        EXECUTE format('ALTER SEQUENCE %I.%I OWNER TO wapt',
+                       obj.sequence_schema, obj.sequence_name);
+    END LOOP;
+END
+$$;
+SQL
+    ) >/dev/null || fail "Unable to apply WAPT ownership/schema ACL corrections"
+
+    POST_DB_OWNER="$(cd / && runuser -u postgres -- \
+        psql -p "$TARGET_PG_PORT" -d postgres -Atqc \
+        "SELECT pg_get_userbyid(datdba) FROM pg_database WHERE datname='wapt';" \
+        2>/dev/null)" || fail "Unable to validate restored database owner"
+    [ "$POST_DB_OWNER" = "wapt" ] || \
+        fail "Restored WAPT database owner is not wapt: ${POST_DB_OWNER:-missing}"
+
+    POST_SCHEMA_ACL="$(cd / && runuser -u postgres -- \
+        psql -p "$TARGET_PG_PORT" -d wapt -Atqc \
+        "SELECT has_schema_privilege('wapt','public','USAGE')::int || '|' || has_schema_privilege('wapt','public','CREATE')::int;" \
+        2>/dev/null)" || fail "Unable to validate restored schema privileges"
+    [ "$POST_SCHEMA_ACL" = "1|1" ] || \
+        fail "Restored public schema privileges for wapt are incomplete: ${POST_SCHEMA_ACL:-missing}"
+
+    NON_WAPT_TABLES="$(cd / && runuser -u postgres -- \
+        psql -p "$TARGET_PG_PORT" -d wapt -Atqc \
+        "SELECT count(*) FROM pg_tables WHERE schemaname='public' AND tableowner <> 'wapt';" \
+        2>/dev/null)" || fail "Unable to validate restored table ownership"
+    [ "$NON_WAPT_TABLES" = "0" ] || \
+        fail "Some restored public tables are not owned by wapt: $NON_WAPT_TABLES"
+
+    NON_WAPT_SEQUENCES="$(cd / && runuser -u postgres -- \
+        psql -p "$TARGET_PG_PORT" -d wapt -Atqc \
+        "SELECT count(*) FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='public' AND c.relkind='S' AND pg_get_userbyid(c.relowner) <> 'wapt';" \
+        2>/dev/null)" || fail "Unable to validate restored sequence ownership"
+    [ "$NON_WAPT_SEQUENCES" = "0" ] || \
+        fail "Some restored public sequences are not owned by wapt: $NON_WAPT_SEQUENCES"
+
+    POST_DB_MARKER="$(cd / && runuser -u postgres -- \
+        psql -p "$TARGET_PG_PORT" -d wapt -Atqc \
+        "SELECT value FROM serverattribs WHERE key='db_version';" \
+        2>/dev/null)" || fail "Unable to read restored WAPT database marker"
+    [ -n "$POST_DB_MARKER" ] || fail "Restored WAPT database marker is empty"
+    [ "$POST_DB_MARKER" = "$SOURCE_DB_MARKER" ] || \
+        fail "Restored DB marker mismatch: source=$SOURCE_DB_MARKER restored=$POST_DB_MARKER"
+
+    echo
+    echo "Restored DB marker: $POST_DB_MARKER"
+    echo "Essential restored table counts:"
+    for table in hostgroups hostpackagesstatus hosts hostsoftwares packages waptusers; do
+        count="$(cd / && runuser -u postgres -- \
+            psql -p "$TARGET_PG_PORT" -d wapt -Atqc \
+            "SELECT count(*) FROM public.${table};" 2>/dev/null)" || \
+            fail "Unable to count restored table: $table"
+        printf '  %-20s %s\n' "$table" "$count"
+    done
+
+    ok "Restored database ownership, schema ACL, marker and essential tables validated"
 }
 
 usage() {
@@ -370,7 +498,7 @@ if [ "$MODE" = "--restore" ]; then
     echo
     echo "Validating restore target..."
 
-    for tool in dpkg-query pg_lsclusters psql runuser systemctl; do
+    for tool in dpkg-query pg_lsclusters psql pg_dump pg_restore dropdb createdb runuser systemctl; do
         command -v "$tool" >/dev/null 2>&1 || fail "Required restore tool missing: $tool"
         ok "Restore tool available: $tool"
     done
@@ -386,7 +514,12 @@ if [ "$MODE" = "--restore" ]; then
         fail "Target package tis-waptsetup is not installed"
 
     systemctl is-active --quiet postgresql || fail "Target PostgreSQL service is not active"
-    systemctl is-active --quiet waptserver || fail "Target waptserver service is not active"
+
+    TARGET_WAPTSERVER_ACTIVE="yes"
+    if ! systemctl is-active --quiet waptserver; then
+        TARGET_WAPTSERVER_ACTIVE="no"
+        warn "Target waptserver service is not active; interrupted-restore state will be checked after PostgreSQL target detection"
+    fi
 
     TARGET_CLUSTERS="$(pg_lsclusters --no-header 2>/dev/null | awk '$4=="online" {print $1 "|" $2 "|" $3 "|" $4 "|" $5}')"
     TARGET_CLUSTER_COUNT="$(printf '%s\n' "$TARGET_CLUSTERS" | awk 'NF {n++} END {print n+0}')"
@@ -413,6 +546,17 @@ EOF
     TARGET_PG_PORT="$(printf '%s\n' "$TARGET_WAPT_CLUSTERS" | awk -F'|' 'NF {print $3; exit}')"
     TARGET_PG_OWNER="$(printf '%s\n' "$TARGET_WAPT_CLUSTERS" | awk -F'|' 'NF {print $5; exit}')"
 
+    if [ "$TARGET_WAPTSERVER_ACTIVE" = "no" ]; then
+        TARGET_PUBLIC_TABLE_COUNT="$(cd / && runuser -u postgres -- \
+            psql -p "$TARGET_PG_PORT" -d wapt -Atqc \
+            "SELECT count(*) FROM pg_tables WHERE schemaname='public';" \
+            2>/dev/null)" || fail "Unable to assess interrupted-restore database state"
+        [ "$TARGET_PUBLIC_TABLE_COUNT" = "0" ] || \
+            fail "Target waptserver is inactive and database is not an empty interrupted-restore state (${TARGET_PUBLIC_TABLE_COUNT} public tables)"
+        warn "Interrupted restore state detected: waptserver inactive and target database has 0 public tables"
+        ok "Interrupted restore state accepted for controlled database restore resume"
+    fi
+
     [ "$TARGET_PG_OWNER" = "postgres" ] || \
         fail "Target PostgreSQL cluster owner is not postgres: $TARGET_PG_OWNER"
 
@@ -436,11 +580,16 @@ EOF
     [ "$TARGET_DB_OWNER" = "wapt" ] || \
         fail "Target WAPT database owner is not wapt: ${TARGET_DB_OWNER:-missing}"
 
-    TARGET_DB_MARKER="$(cd / && runuser -u postgres -- \
-        psql -p "$TARGET_PG_PORT" -d wapt -Atqc \
-        "SELECT value FROM serverattribs WHERE key='db_version';" \
-        2>/dev/null)" || fail "Unable to read target WAPT database marker"
-    [ -n "$TARGET_DB_MARKER" ] || fail "Target WAPT database marker is empty"
+    if [ "$TARGET_WAPTSERVER_ACTIVE" = "yes" ]; then
+        TARGET_DB_MARKER="$(cd / && runuser -u postgres -- \
+            psql -p "$TARGET_PG_PORT" -d wapt -Atqc \
+            "SELECT value FROM serverattribs WHERE key='db_version';" \
+            2>/dev/null)" || fail "Unable to read target WAPT database marker"
+        [ -n "$TARGET_DB_MARKER" ] || fail "Target WAPT database marker is empty"
+    else
+        TARGET_DB_MARKER="<interrupted-empty>"
+        warn "Target DB marker check skipped for accepted empty interrupted-restore state"
+    fi
 
     echo
     echo "Target Debian:          $TARGET_DEBIAN"
@@ -470,7 +619,16 @@ else
 
     echo
     echo "SAFETY BACKUP PASSED"
-    echo "Destructive restore operations are not implemented yet in v${SCRIPT_VERSION}."
-    echo "Target database, configuration and repository were NOT replaced."
+
+    restore_target_database
+
+    echo
+    echo "DATABASE RESTORE PASSED"
+    echo "The target WAPT database has been replaced and validated."
+    echo "waptserver/wapttasks remain stopped intentionally."
+    echo "Target configuration, certificates, nginx configuration and repository were NOT replaced."
+    echo "Safety backup retained at: $SAFETY_ARCHIVE"
+    echo
+    echo "STOP BARRIER: configuration/identity/repository restore is not implemented yet in v${SCRIPT_VERSION}."
     exit 3
 fi
