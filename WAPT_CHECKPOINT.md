@@ -3669,49 +3669,246 @@ The validated Debian and Windows lineages have now been reunified on
 
 The current validation milestone is:
 
-    VALIDATE WAPT 1.8.3 ON DEBIAN 10 BEFORE CONSOLIDATED RELEASE
+``` text
+VALIDATE WAPT 1.8.3 ON DEBIAN 10 BEFORE CONSOLIDATED RELEASE
+```
 
-### Debian 10 - validation initiale WAPT 1.8.3 / DB 1.8.3.0
+### Debian 10 — validation initiale WAPT 1.8.3 / DB 1.8.3.0
 
 Test package:
-- tis-waptserver-1.8.3.7436-2377932b-debian-10-amd64
-- SHA256: cef587f768f176d212faebfddeabcda2f7385ed38b16bca23717930fea750c83
-- source commit: 2377932b1
-- natural Git build count: 7436
+
+``` text
+tis-waptserver-1.8.3.7436-2377932b-debian-10-amd64
+SHA256: cef587f768f176d212faebfddeabcda2f7385ed38b16bca23717930fea750c83
+source commit: 2377932b1
+natural Git build count: 7436
+```
 
 Validated on Debian 10.13:
 
 1. Upgrade from fresh WAPT 1.8.2.7398:
-   - initial DB marker: 1.8.2
+   - initial DB marker: `1.8.2`
    - package upgrade to 1.8.3.7436: PASS
    - postconf: PASS
-   - final DB marker: 1.8.3.0
+   - final DB marker: `1.8.3.0`
    - waptserver, wapttasks, PostgreSQL and nginx active
 
 2. Fresh installation:
    - pristine Debian 10.13
    - direct installation of WAPT 1.8.3.7436: PASS
    - postconf: PASS
-   - new DB initialized directly at 1.8.3.0
+   - new DB initialized directly at `1.8.3.0`
    - waptserver, wapttasks, PostgreSQL and nginx active
 
 3. Idempotence:
    - postconf.sh executed again
-   - DB marker remained 1.8.3.0: PASS
+   - DB marker remained `1.8.3.0`: PASS
 
-Next validation:
-- authentic historical DB migration 1.8.2.1 -> 1.8.3.0
+Still required:
 
-Resume in this order:
+``` text
+authentic historical DB migration:
+1.8.2.1 -> 1.8.3.0
+```
 
-    1. Validate authentic historical DB migration from 1.8.2.1 to 1.8.3.0.
-    2. Build all server/setup/client artifacts from the common 1.8.3 release state.
-    3. Re-evaluate final Windows Authenticode signing and product identity/branding.
-    4. Validate authentic WAPT 1.8.2.7393 -> 1.8.3 migration, including historical client upgrade.
-    5. Freeze the first consolidated autonomous WAPT 1.8.3 release.
-    6. Only after the consolidated Debian 10 release is validated, begin Debian 11.
+This is the next Debian-side validation before release freeze.
 
-Do not begin Debian 11 before the 1.8.3 consolidation milestone is closed.
+### Windows 1.8.3.7438 — build complet et signature validés
+
+Date:
+
+``` text
+2026-09-21
+```
+
+Common release line:
+
+``` text
+branch: release/1.8.3
+HEAD: b9abfc4ab
+git rev-list --count HEAD: 7438
+version: 1.8.3.7438
+```
+
+The complete Lazarus Windows build was performed from this common
+`release/1.8.3` state using the established historical build chain.
+
+Validated Lazarus artifacts:
+
+``` text
+wapt-get.exe
+waptguihelper.pyd
+waptdeploy.exe
+wapttray.exe
+waptconsole.exe
+waptexit.exe
+waptself.exe
+waptmessage.exe
+waptsetuputil.dll
+```
+
+The setup was also generated from the same release state:
+
+``` text
+waptsetup.exe
+```
+
+and preserved with the historical server-side naming:
+
+``` text
+waptsetup-tis.exe
+```
+
+The Windows artifacts were checked for the expected release identity:
+
+``` text
+FileVersion:    1.8.3.7438
+ProductVersion: 1.8.3
+ProductName:    WAPT Community Edition
+```
+
+The setup executable retains its installer identity:
+
+``` text
+ProductName:    WAPTSetup
+```
+
+The build produced the natural Git-derived build number; no artificial build
+number was forced.
+
+### Windows Authenticode validation
+
+All final Windows 1.8.3.7438 build artifacts requiring Authenticode signing
+were signed with the temporary laboratory certificate:
+
+``` text
+Subject:    CN=WAPT Lab Code Signing
+Thumbprint: D8B8C49EEB204125D7609365D4CF604E8B7056AC
+Algorithm:  SHA-256
+Timestamp:  none (laboratory validation)
+```
+
+SignTool `/pa` verification passed.
+
+The laboratory signing certificate/private key is validation-only and must not
+become the final distribution trust model.
+
+Do not commit:
+
+``` text
+wapt-lab-codesign.pfx
+wapt-lab-codesign.cer
+```
+
+Before the final autonomous 1.8.3 release, the production Authenticode
+strategy must be explicitly reviewed and validated. Any re-signing that
+changes PE signatures/hashes requires final artifact revalidation.
+
+The WAPT package-signing trust system remains separate from Windows
+Authenticode:
+
+``` text
+Authenticode -> Windows PE trust
+WAPT signer  -> WAPT package trust
+```
+
+Do not conflate the two.
+
+### Windows 1.8.3.7438 milestone status
+
+``` text
+Windows source line reunified:        PASS
+Natural Git build 7438:              PASS
+9 Lazarus artifacts rebuilt:         PASS
+waptsetup-tis.exe generated:         PASS
+Release metadata:                    PASS
+Lab Authenticode signing:            PASS
+SignTool verification:               PASS
+```
+
+This closes the **Windows build/signature validation** part of the
+1.8.3 consolidation milestone.
+
+It does **not** yet prove the complete 1.8.3 client migration path.
+
+Still required on the Windows side:
+
+``` text
+1. validate the final/common release setup and agent publication path;
+2. validate authentic WAPT 1.8.2.7393 -> 1.8.3 client migration;
+3. validate historical package-signing continuity;
+4. validate waptupgrade generation/install against the consolidated 1.8.3
+   server;
+5. perform final product identity/branding/signing review.
+```
+
+### 1.8.3 consolidation — exact remaining sequence
+
+The validated state is now:
+
+``` text
+Debian 10:
+    1.8.3.7436 package
+    fresh install: PASS
+    1.8.2.7398 -> 1.8.3.7436: PASS
+    DB marker 1.8.3.0: PASS
+    postconf idempotence: PASS
+    historical DB 1.8.2.1 -> 1.8.3.0: PENDING
+
+Windows:
+    common release/1.8.3 line: PASS
+    natural build 1.8.3.7438: PASS
+    complete Lazarus build: PASS
+    setup generation: PASS
+    lab Authenticode signing: PASS
+    authentic 7393 -> 1.8.3 migration: PENDING
+```
+
+Resume in this exact order:
+
+``` text
+1. Validate authentic historical DB migration from 1.8.2.1 to 1.8.3.0.
+2. Validate the common 1.8.3 server/setup/client artifacts together.
+3. Validate final Windows setup/agent publication and package-signing
+   continuity against the consolidated 1.8.3 server.
+4. Re-evaluate final Windows Authenticode signing and product
+   identity/branding.
+5. Validate authentic WAPT 1.8.2.7393 -> 1.8.3 migration, including the
+   historical client upgrade and final WAPTService state.
+6. Validate repository/package revision continuity and the current
+   `<prefix>-waptupgrade` generation/install path.
+7. Perform the final autonomous-distribution check:
+   installation must not depend on an obsolete external WAPT repository or
+   website.
+8. Update/finalize the release documentation and compatibility matrix.
+9. Freeze the first consolidated autonomous WAPT 1.8.3 release.
+10. Only after the consolidated Debian 10 release is validated and frozen,
+    begin Debian 11.
+```
+
+### Release 1.8.3 freeze criteria
+
+Do not tag/freeze 1.8.3 until all of the following are PASS:
+
+``` text
+[ ] common Debian + Windows source lineage validated
+[ ] Debian 10 fresh installation
+[ ] Debian 10 1.8.2.7398 -> 1.8.3 migration
+[ ] DB migration 1.8.2.1 -> 1.8.3.0
+[ ] DB migration idempotence
+[ ] Windows 1.8.3.7438 build
+[ ] setup/agent publication
+[ ] WAPT package-signing continuity
+[ ] authentic 7393 -> 1.8.3 client migration
+[ ] historical waptupgrade continuity
+[ ] WAPTService final state validated
+[ ] final Authenticode strategy reviewed
+[ ] autonomous installation/distribution validated
+[ ] release documentation updated
+[ ] compatibility matrix updated
+```
+
+Do not begin Debian 11 before this checklist is closed.
 
 ## 44. Resume protocol for the next ChatGPT thread
 
