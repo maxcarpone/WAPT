@@ -609,7 +609,7 @@ consolidated autonomous release.
 ## 10. Known limitations and operational notes
 
 This procedure documents the validated Debian 10 disaster-recovery path for
-the WAPT 1.8.2 lineage. It is not yet the final consolidated WAPT 1.8.3.1
+the WAPT 1.8.2 lineage. It is not yet the final consolidated WAPT 1.8.3
 procedure.
 
 The following operational constraints apply:

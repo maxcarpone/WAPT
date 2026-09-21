@@ -1819,10 +1819,10 @@ After all remaining Debian 10 DR work is complete, the first deliberately
 consolidated autonomous release is planned as:
 
 ``` text
-1.8.3.1
+1.8.3
 ```
 
-Before freezing 1.8.3.1:
+Before freezing 1.8.3:
 
 1. reunify the validated Windows and Debian source lineages;
 2. build server/setup/client artifacts consistently from the common
@@ -1857,7 +1857,7 @@ historical 7393 DR validation
     -> reproducible autonomous DR backup/restore tooling
     -> end-to-end validation of that final mechanism with an evolved 7398 backup
     -> freeze Debian 10 DR
-    -> consolidate 1.8.3.1
+    -> consolidate 1.8.3
     -> Debian 11
 ```
 
@@ -1971,7 +1971,7 @@ administrator. Current historical value:
 0790007d
 ```
 
-Final operational repository permission policy planned for 1.8.3.1:
+Final operational repository permission policy planned for 1.8.3:
 
 ``` text
 directories: 0750 wapt:www-data
@@ -2192,7 +2192,7 @@ Proceed in this order:
    - test at least one historical client.
 10. Use an evolved 7398 backup as the end-to-end validation of the final DR mechanism.
 11. Freeze the Debian 10 DR procedure only after that PASS.
-12. Consolidate the validated lineages into release 1.8.3.1.
+12. Consolidate the validated lineages into release 1.8.3.
 13. Only then begin Debian 11.
 ```
 
@@ -2404,7 +2404,7 @@ evolved 7398 backup
     -> historical client validation
     -> freeze restore V1.0
     -> freeze Debian 10 DR
-    -> consolidate release 1.8.3.1
+    -> consolidate release 1.8.3
     -> Debian 11
 ```
 
@@ -2766,7 +2766,7 @@ Resume in this order:
 9. After a complete real DR restore passes, validate with an evolved 7398
    backup and at least one historical client.
 10. Freeze restore V1.0 and Debian 10 DR only after those PASS results.
-11. Consolidate the first autonomous release as 1.8.3.1.
+11. Consolidate the first autonomous release as 1.8.3.
 12. Only then begin Debian 11.
 ```
 
@@ -3164,7 +3164,7 @@ Proceed incrementally:
 11. Only after the complete restore passes, promote restore tooling toward V1.0
     and freeze Debian 10 DR.
 12. Then add/finalize the post-DR modernization roadmap and consolidate the
-    first autonomous release as 1.8.3.1.
+    first autonomous release as 1.8.3.
 13. Do not begin Debian 11 yet.
 ```
 
@@ -3587,8 +3587,8 @@ Planned workstreams:
 
 ``` text
 A. Close/freeze Debian 10 DR tooling and documentation.
-B. Consolidate the validated Windows and Debian lineages as WAPT 1.8.3.1.
-C. Validate real 7393 -> 1.8.3.1 server/client migration.
+B. Consolidate the validated Windows and Debian lineages as WAPT 1.8.3.
+C. Validate real 7393 -> 1.8.3 server/client migration.
 D. Provide autonomous installation/distribution:
      - synchronized Git/artifact path, and/or
      - project-owned APT repository.
@@ -3627,7 +3627,7 @@ smallest safe number of intermediate releases.
 The first consolidated autonomous release remains:
 
 ``` text
-1.8.3.1
+1.8.3
 ```
 
 The validated Windows 1.8.2.7402 artifacts remain signed with the temporary
@@ -3666,20 +3666,20 @@ FQDN semantics.
 
 The next milestone is:
 
-    REUNIFY THE VALIDATED DEBIAN AND WINDOWS LINEAGES FOR WAPT 1.8.3.1
+    REUNIFY THE VALIDATED DEBIAN AND WINDOWS LINEAGES FOR WAPT 1.8.3
 
 Resume in this order:
 
     1. Reunify the validated Debian and Windows source lineages.
-    2. Prepare the first consolidated autonomous release as 1.8.3.1.
+    2. Prepare the first consolidated autonomous release as 1.8.3.
     3. Implement the explicit DB marker migration to at least 1.8.3.0.
     4. Build all server/setup/client artifacts from the common release state.
     5. Re-evaluate final Windows Authenticode signing.
-    6. Validate authentic 7393 -> 1.8.3.1 migration.
+    6. Validate authentic 7393 -> 1.8.3 migration.
     7. Only after the consolidated Debian 10 release is validated, begin the
        Debian 11 phase.
 
-Do not begin Debian 11 before the 1.8.3.1 consolidation milestone is closed.
+Do not begin Debian 11 before the 1.8.3 consolidation milestone is closed.
 
 ## 44. Resume protocol for the next ChatGPT thread
 
@@ -3691,7 +3691,7 @@ Considère WAPT_CHECKPOINT.md comme l'état technique faisant autorité.
 Le jalon DR Debian 10 Backup V1.0 + Restore V1.0 est gelé et documenté
 dans WAPT_DR_DEBIAN10.md, commit 46f0bb671.
 On reprend à la section "Exact next action" pour la réunification des
-lignées Debian et Windows en vue de WAPT 1.8.3.1.
+lignées Debian et Windows en vue de WAPT 1.8.3.
 Réponses courtes, une étape à la fois.
 ```
 
