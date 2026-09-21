@@ -3636,41 +3636,48 @@ distribution, explicitly choose and validate the production signing strategy.
 
 ## 43. Exact next action — new-thread resume point
 
-The validated Debian 10 DR restore tool is now frozen as V1.0.
+The Debian 10 disaster-recovery milestone is now frozen and documented.
 
-Restore V1.0:
-- script: `tools/waptserver-restore.sh`
-- commit: `50246dd1f95036ebb0b2a7cd27004deadac5a76a`
-- tag: `server-buster-restore-v1.0`
-- SHA256:
-  `06ff15a4b12b1c92b8f7885a5244e64a1859427093fbfcc19a986b77acdd2270`
-- V1.0 differs from validated V0.7.2 only by the `SCRIPT_VERSION`
-  promotion; no functional restore logic was changed.
+Frozen DR components:
+
+- Backup V1.0:
+  - script: `tools/waptserver-backup.sh`
+  - commit: `226b2cc1`
+  - SHA256:
+    `db8f75aa04fad3e7aa1419e446ddcf3fa19716565237e9ef3a7bde3a5fd8eede`
+- Restore V1.0:
+  - script: `tools/waptserver-restore.sh`
+  - commit: `50246dd1f95036ebb0b2a7cd27004deadac5a76a`
+  - tag: `server-buster-restore-v1.0`
+  - SHA256:
+    `06ff15a4b12b1c92b8f7885a5244e64a1859427093fbfcc19a986b77acdd2270`
+- Complete operational DR procedure:
+  - document: `WAPT_DR_DEBIAN10.md`
+  - commit: `46f0bb671`
+  - covers Backup V1.0, Restore V1.0, restore validation,
+    pre-production cutover barrier, client reconnection, trust assets and
+    operational limitations.
+
+The pre-production FQDN/DNS/TLS/client-reconnection barrier is mandatory.
+
+The validated historical WAPT TLS certificate expires on 2027-12-03 and must
+be renewed or replaced before that date while preserving the WAPT service
+FQDN semantics.
 
 The next milestone is:
 
-``` text
-FREEZE THE DEBIAN 10 DR RESTORE TOOLING, THEN BEGIN 1.8.3.1 CONSOLIDATION
-```
+    REUNIFY THE VALIDATED DEBIAN AND WINDOWS LINEAGES FOR WAPT 1.8.3.1
 
 Resume in this order:
 
-``` text
-1. Review the validated V0.7.2 restore result and decide/promote the restore
-   script to V1.0 without functional changes if no further DR test is required.
-2. Commit/tag the frozen restore release explicitly.
-3. Freeze/document the complete Debian 10 Backup V1.0 + Restore V1.0 procedure.
-4. Preserve the pre-production FQDN/DNS/TLS/client-reconnection barrier.
-5. Record the TLS renewal deadline before 2027-12-03.
-6. Reunify the validated Debian and Windows source lineages.
-7. Prepare the first consolidated autonomous release as 1.8.3.1.
-8. Implement the explicit DB marker migration to at least 1.8.3.0.
-9. Build all server/setup/client artifacts from the common release state.
-10. Re-evaluate final Windows Authenticode signing.
-11. Validate authentic 7393 -> 1.8.3.1 migration.
-12. Only after the consolidated Debian 10 release is validated, begin the
-    Debian 11 phase.
-```
+    1. Reunify the validated Debian and Windows source lineages.
+    2. Prepare the first consolidated autonomous release as 1.8.3.1.
+    3. Implement the explicit DB marker migration to at least 1.8.3.0.
+    4. Build all server/setup/client artifacts from the common release state.
+    5. Re-evaluate final Windows Authenticode signing.
+    6. Validate authentic 7393 -> 1.8.3.1 migration.
+    7. Only after the consolidated Debian 10 release is validated, begin the
+       Debian 11 phase.
 
 Do not begin Debian 11 before the 1.8.3.1 consolidation milestone is closed.
 
@@ -3681,9 +3688,10 @@ Attach this checkpoint and send:
 ``` text
 Gipity, on reprend le projet WAPT à partir du checkpoint joint.
 Considère WAPT_CHECKPOINT.md comme l'état technique faisant autorité.
-La restauration automatisée Debian 10 est validée jusqu'à V0.7.2,
-commit bb05f691.
-On reprend à la section "Exact next action".
+Le jalon DR Debian 10 Backup V1.0 + Restore V1.0 est gelé et documenté
+dans WAPT_DR_DEBIAN10.md, commit 46f0bb671.
+On reprend à la section "Exact next action" pour la réunification des
+lignées Debian et Windows en vue de WAPT 1.8.3.1.
 Réponses courtes, une étape à la fois.
 ```
 
