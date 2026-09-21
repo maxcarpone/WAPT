@@ -1,0 +1,662 @@
+#!/bin/bash
+set -u
+
+SCRIPT_VERSION="1.0"
+BACKUP_FORMAT_VERSION="1"
+EXPECTED_DEBIAN_MAJOR="10"
+EXPECTED_WAPT_PREFIX="1.8.2.7393"
+SOURCE_BUILD="7393"
+
+# Validated target packages.
+# A target is authorized only when its package metadata AND SHA256 match.
+load_target() {
+    local build="$1"
+
+    case "$build" in
+        7398)
+            TARGET_BUILD="7398"
+            TARGET_PACKAGE="tis-waptserver"
+            TARGET_VERSION="1.8.2.7398-88170eee-debian-10-amd64"
+            TARGET_ARCH="amd64"
+            TARGET_SHA256="fb9406d37c50dfaaa3ee6aec417ac49f2b986730648bcfaf8c3c26be6266a823"
+            ;;
+        *)
+            echo "[BLOCK] Target build is not authorized: $build"
+            return 1
+            ;;
+    esac
+
+    return 0
+}
+
+TARGET_BUILD="${WAPT_TARGET_BUILD:-7398}"
+load_target "$TARGET_BUILD" || exit 1
+WAPT_CONFIG="/opt/wapt/conf/waptserver.ini"
+BACKUP_ROOT="/var/www/wapt-backups"
+
+ok()    { echo "[ OK ] $*"; }
+warn()  { echo "[WARN] $*"; }
+block() { echo "[BLOCK] $*"; BLOCKING=$((BLOCKING + 1)); }
+
+BLOCKING=0
+WAPT_DB_COUNT=0
+WAPT_DB_PORT=""
+WAPT_DB_VERSION=""
+DB_VERSION=""
+CONFIG_SHA256=""
+
+declare -A DB_COUNTS
+
+precheck() {
+    BLOCKING=0
+
+    echo "WAPT Server Buster migration precheck v${SCRIPT_VERSION}"
+    echo "====================================================="
+    echo
+
+    if [ "$(id -u)" -eq 0 ]; then
+        ok "Running as root"
+    else
+        block "Must be run as root"
+    fi
+
+    if [ -r /etc/os-release ]; then
+        . /etc/os-release
+        echo "OS: ${PRETTY_NAME:-unknown}"
+        if [ "${VERSION_ID:-}" = "$EXPECTED_DEBIAN_MAJOR" ]; then
+            ok "Debian ${EXPECTED_DEBIAN_MAJOR}"
+        else
+            block "Expected Debian ${EXPECTED_DEBIAN_MAJOR}, found ${VERSION_ID:-unknown}"
+        fi
+    else
+        block "/etc/os-release unavailable"
+    fi
+
+    WAPT_VERSION="$(dpkg-query -W -f='${Version}' tis-waptserver 2>/dev/null || true)"
+    echo "tis-waptserver: ${WAPT_VERSION:-not installed}"
+
+    case "$WAPT_VERSION" in
+        ${EXPECTED_WAPT_PREFIX}*)
+            ok "Expected WAPT 7393 source version"
+            ;;
+        "")
+            block "tis-waptserver is not installed"
+            ;;
+        *)
+            block "Unexpected WAPT server version: $WAPT_VERSION"
+            ;;
+    esac
+
+    if [ -x /opt/wapt/bin/python ]; then
+        PYTHON_VERSION="$(/opt/wapt/bin/python --version 2>&1)"
+        echo "WAPT Python: $PYTHON_VERSION"
+    else
+        PYTHON_VERSION=""
+        block "/opt/wapt/bin/python missing"
+    fi
+
+    for service in waptserver wapttasks nginx; do
+        if systemctl is-active --quiet "$service"; then
+            ok "Service $service active"
+        else
+            block "Service $service is not active"
+        fi
+    done
+
+    if [ -f "$WAPT_CONFIG" ]; then
+        ok "Configuration found: $WAPT_CONFIG"
+        CONFIG_SHA256="$(sha256sum "$WAPT_CONFIG" | awk '{print $1}')"
+        echo "Config SHA256: $CONFIG_SHA256"
+    else
+        block "Configuration missing: $WAPT_CONFIG"
+    fi
+
+    for cmd in pg_dump pg_restore psql sha256sum tar openssl apt-get \
+               dpkg-query runuser stat df hostname; do
+        if command -v "$cmd" >/dev/null 2>&1; then
+            ok "Tool available: $cmd"
+        else
+            block "Required tool missing: $cmd"
+        fi
+    done
+
+    if command -v pg_lsclusters >/dev/null 2>&1; then
+        ok "Tool available: pg_lsclusters"
+
+        WAPT_DB_COUNT=0
+        WAPT_DB_PORT=""
+        WAPT_DB_VERSION=""
+
+        while read -r pg_version pg_cluster pg_port pg_status pg_owner rest; do
+            [ "$pg_status" = "online" ] || continue
+
+            if runuser -u postgres -- psql -p "$pg_port" -Atc \
+                "SELECT 1 FROM pg_database WHERE datname='wapt';" 2>/dev/null \
+                | grep -qx '1'; then
+                WAPT_DB_COUNT=$((WAPT_DB_COUNT + 1))
+                WAPT_DB_PORT="$pg_port"
+                WAPT_DB_VERSION="$pg_version"
+            fi
+        done < <(pg_lsclusters --no-header)
+
+        case "$WAPT_DB_COUNT" in
+            1)
+                ok "WAPT database found on PostgreSQL ${WAPT_DB_VERSION}, port ${WAPT_DB_PORT}"
+                ;;
+            0)
+                block "No WAPT database found on any online PostgreSQL cluster"
+                ;;
+            *)
+                block "WAPT database found on multiple PostgreSQL clusters"
+                ;;
+        esac
+    else
+        block "Required tool missing: pg_lsclusters"
+    fi
+
+    if [ "$WAPT_DB_COUNT" -eq 1 ]; then
+        DB_VERSION="$(runuser -u postgres -- psql -p "$WAPT_DB_PORT" -d wapt -Atc \
+            "SELECT value::text FROM serverattribs WHERE key='db_version';" \
+            2>/dev/null || true)"
+
+        if [ "$DB_VERSION" = '"1.8.2.1"' ]; then
+            ok "WAPT database schema version: ${DB_VERSION}"
+        elif [ -z "$DB_VERSION" ]; then
+            block "Unable to read WAPT database schema version"
+        else
+            block "Unexpected WAPT database schema version: ${DB_VERSION}"
+        fi
+
+        echo "Database baseline:"
+        for table in \
+            hostgroups \
+            hostpackagesstatus \
+            hosts \
+            hostsoftwares \
+            packages \
+            waptusers
+        do
+            count="$(runuser -u postgres -- psql -p "$WAPT_DB_PORT" -d wapt -Atc \
+                "SELECT count(*) FROM ${table};" 2>/dev/null || true)"
+
+            if [[ "$count" =~ ^[0-9]+$ ]]; then
+                DB_COUNTS["$table"]="$count"
+                echo "  ${table}=${count}"
+            else
+                block "Unable to count table: ${table}"
+            fi
+        done
+    fi
+
+    echo
+    echo "====================================================="
+    if [ "$BLOCKING" -eq 0 ]; then
+        echo "PRECHECK RESULT: PASS"
+        return 0
+    else
+        echo "PRECHECK RESULT: BLOCKED ($BLOCKING blocking issue(s))"
+        return 1
+    fi
+}
+
+backup() {
+    precheck || {
+        echo
+        echo "BACKUP RESULT: BLOCKED (precheck failed)"
+        return 1
+    }
+
+    echo
+    echo "WAPT Server Buster migration backup v${SCRIPT_VERSION}"
+    echo "====================================================="
+
+    TIMESTAMP="$(date '+%Y%m%d-%H%M%S')"
+    HOST="$(hostname)"
+    BACKUP_DIR="${BACKUP_ROOT}/migration-${SOURCE_BUILD}-${TARGET_BUILD}-${TIMESTAMP}"
+    DB_DUMP="${BACKUP_DIR}/wapt-${HOST}.dump"
+    CONFIG_ARCHIVE="${BACKUP_DIR}/wapt-config-${HOST}.tar.gz"
+    MANIFEST="${BACKUP_DIR}/manifest.txt"
+    CHECKSUMS="${BACKUP_DIR}/SHA256SUMS"
+
+    # Conservative space requirement:
+    # twice the active PostgreSQL cluster size + 1 GiB.
+    PG_DATA_DIR="$(pg_lsclusters --no-header | awk \
+        -v port="$WAPT_DB_PORT" '$3 == port {print $6; exit}')"
+
+    if [ -z "$PG_DATA_DIR" ] || [ ! -d "$PG_DATA_DIR" ]; then
+        block "Unable to determine PostgreSQL data directory"
+        echo "BACKUP RESULT: BLOCKED"
+        return 1
+    fi
+
+    PG_SIZE_BYTES="$(du -sb "$PG_DATA_DIR" 2>/dev/null | awk '{print $1}')"
+    FREE_BYTES="$(df -B1 --output=avail "$BACKUP_ROOT" 2>/dev/null | tail -1 | tr -d ' ')"
+
+    # BACKUP_ROOT may not exist yet; inspect /var/www in that case.
+    if ! [[ "$FREE_BYTES" =~ ^[0-9]+$ ]]; then
+        FREE_BYTES="$(df -B1 --output=avail /var/www | tail -1 | tr -d ' ')"
+    fi
+
+    if ! [[ "$PG_SIZE_BYTES" =~ ^[0-9]+$ ]] || \
+       ! [[ "$FREE_BYTES" =~ ^[0-9]+$ ]]; then
+        block "Unable to determine backup space requirements"
+        echo "BACKUP RESULT: BLOCKED"
+        return 1
+    fi
+
+    REQUIRED_BYTES=$((PG_SIZE_BYTES * 2 + 1073741824))
+
+    echo "PostgreSQL data size: ${PG_SIZE_BYTES} bytes"
+    echo "Backup filesystem free: ${FREE_BYTES} bytes"
+    echo "Required safety space: ${REQUIRED_BYTES} bytes"
+
+    if [ "$FREE_BYTES" -lt "$REQUIRED_BYTES" ]; then
+        block "Insufficient free space for verified backup"
+        echo "BACKUP RESULT: BLOCKED"
+        return 1
+    fi
+    ok "Sufficient free space"
+
+    mkdir -p "$BACKUP_DIR" || {
+        block "Unable to create $BACKUP_DIR"
+        return 1
+    }
+    chmod 700 "$BACKUP_DIR"
+
+    echo
+    echo "Creating PostgreSQL custom-format dump..."
+    if (cd /tmp && runuser -u postgres -- pg_dump -p "$WAPT_DB_PORT" -Fc -d wapt) > "$DB_DUMP"; then
+        ok "Database dump created"
+    else
+        block "Database dump failed"
+        return 1
+    fi
+
+    if [ ! -s "$DB_DUMP" ]; then
+        block "Database dump is empty"
+        return 1
+    fi
+
+    if pg_restore -l "$DB_DUMP" >/dev/null 2>&1; then
+        ok "Database dump verified with pg_restore -l"
+    else
+        block "Database dump verification failed"
+        return 1
+    fi
+
+    echo
+    echo "Creating configuration archive..."
+
+    BACKUP_PATHS=()
+    for path in \
+        /opt/wapt/conf \
+        /opt/wapt/waptserver/ssl \
+        /etc/nginx/sites-available/wapt.conf \
+        /var/www/ssl
+    do
+        if [ -e "$path" ]; then
+            BACKUP_PATHS+=("${path#/}")
+        else
+            warn "Optional backup path missing: $path"
+        fi
+    done
+
+    if [ "${#BACKUP_PATHS[@]}" -eq 0 ]; then
+        block "No configuration paths available for backup"
+        return 1
+    fi
+
+    if tar -C / -czf "$CONFIG_ARCHIVE" "${BACKUP_PATHS[@]}"; then
+        ok "Configuration archive created"
+    else
+        block "Configuration archive failed"
+        return 1
+    fi
+
+    if tar -tzf "$CONFIG_ARCHIVE" >/dev/null 2>&1; then
+        ok "Configuration archive verified"
+    else
+        block "Configuration archive verification failed"
+        return 1
+    fi
+
+    {
+        echo "script_version=${SCRIPT_VERSION}"
+        echo "backup_format_version=${BACKUP_FORMAT_VERSION}"
+        echo "timestamp=${TIMESTAMP}"
+        echo "hostname=${HOST}"
+        echo "os=${PRETTY_NAME:-unknown}"
+        echo "kernel=$(uname -r)"
+        echo "wapt_version=${WAPT_VERSION}"
+        echo "source_build=${SOURCE_BUILD}"
+        echo "target_build=${TARGET_BUILD}"
+        echo "target_package=${TARGET_PACKAGE}"
+        echo "target_version=${TARGET_VERSION}"
+        echo "target_arch=${TARGET_ARCH}"
+        echo "target_sha256=${TARGET_SHA256}"
+        echo "wapt_python=${PYTHON_VERSION}"
+        echo "config_path=${WAPT_CONFIG}"
+        echo "config_sha256=${CONFIG_SHA256}"
+        echo "postgresql_version=${WAPT_DB_VERSION}"
+        echo "postgresql_port=${WAPT_DB_PORT}"
+        echo "postgresql_data_dir=${PG_DATA_DIR}"
+        echo "postgresql_data_size_bytes=${PG_SIZE_BYTES}"
+        echo "db_version=${DB_VERSION}"
+        for table in \
+            hostgroups \
+            hostpackagesstatus \
+            hosts \
+            hostsoftwares \
+            packages \
+            waptusers
+        do
+            echo "${table}=${DB_COUNTS[$table]}"
+        done
+    } > "$MANIFEST"
+
+    (
+        cd "$BACKUP_DIR" || exit 1
+        sha256sum "$(basename "$DB_DUMP")" \
+                  "$(basename "$CONFIG_ARCHIVE")" \
+                  "$(basename "$MANIFEST")" > "$(basename "$CHECKSUMS")"
+    ) || {
+        block "Unable to generate SHA256SUMS"
+        return 1
+    }
+
+    if (cd "$BACKUP_DIR" && sha256sum -c SHA256SUMS); then
+        ok "Backup checksums verified"
+    else
+        block "Backup checksum verification failed"
+        return 1
+    fi
+
+    chmod 600 "$DB_DUMP" "$CONFIG_ARCHIVE" "$MANIFEST" "$CHECKSUMS"
+
+    echo
+    echo "Backup directory: $BACKUP_DIR"
+    echo "Database dump: $(basename "$DB_DUMP")"
+    echo "Configuration archive: $(basename "$CONFIG_ARCHIVE")"
+    echo "Manifest: $(basename "$MANIFEST")"
+    echo "Checksums: $(basename "$CHECKSUMS")"
+    echo
+    echo "====================================================="
+    echo "BACKUP RESULT: PASS"
+}
+
+validate_target_package() {
+    local deb="$1"
+    local actual_sha256
+    local actual_package
+    local actual_version
+    local actual_arch
+
+    [ -f "$deb" ] || {
+        block "Target package not found: $deb"
+        return 1
+    }
+
+    actual_sha256="$(sha256sum "$deb" | awk '{print $1}')"
+    actual_package="$(dpkg-deb -f "$deb" Package 2>/dev/null)"
+    actual_version="$(dpkg-deb -f "$deb" Version 2>/dev/null)"
+    actual_arch="$(dpkg-deb -f "$deb" Architecture 2>/dev/null)"
+
+    [ "$actual_package" = "$TARGET_PACKAGE" ] || {
+        block "Unexpected target package: $actual_package"
+        return 1
+    }
+
+    [ "$actual_version" = "$TARGET_VERSION" ] || {
+        block "Unexpected target version: $actual_version"
+        return 1
+    }
+
+    [ "$actual_arch" = "$TARGET_ARCH" ] || {
+        block "Unexpected target architecture: $actual_arch"
+        return 1
+    }
+
+    [ "$actual_sha256" = "$TARGET_SHA256" ] || {
+        block "Target package SHA256 mismatch"
+        return 1
+    }
+
+    ok "Target package validated: $(basename "$deb")"
+    return 0
+}
+
+find_valid_backup() {
+    local candidate
+    local manifest
+
+    VALID_BACKUP=""
+
+    while IFS= read -r candidate; do
+        manifest="${candidate}/manifest.txt"
+
+        [ -f "$manifest" ] || continue
+        [ -f "${candidate}/SHA256SUMS" ] || continue
+
+        grep -qx "backup_format_version=${BACKUP_FORMAT_VERSION}" "$manifest" || continue
+        grep -qx "hostname=$(hostname)" "$manifest" || continue
+        grep -qx "source_build=${SOURCE_BUILD}" "$manifest" || continue
+        grep -qx "target_build=${TARGET_BUILD}" "$manifest" || continue
+        grep -qx "target_package=${TARGET_PACKAGE}" "$manifest" || continue
+        grep -qx "target_version=${TARGET_VERSION}" "$manifest" || continue
+        grep -qx "target_arch=${TARGET_ARCH}" "$manifest" || continue
+        grep -qx "target_sha256=${TARGET_SHA256}" "$manifest" || continue
+
+        [ -f "$WAPT_CONFIG" ] || continue
+
+        local current_config_sha256
+        current_config_sha256="$(sha256sum "$WAPT_CONFIG" | awk '{print $1}')"
+
+        grep -qx "config_sha256=${current_config_sha256}" "$manifest" || continue
+
+        if (cd "$candidate" && sha256sum -c SHA256SUMS >/dev/null 2>&1); then
+            VALID_BACKUP="$candidate"
+            return 0
+        fi
+    done < <(
+        find "$BACKUP_ROOT" -maxdepth 1 -type d \
+            -name "migration-${SOURCE_BUILD}-${TARGET_BUILD}-*" \
+            -print 2>/dev/null | sort -r
+    )
+
+    return 1
+}
+
+postcheck_upgrade() {
+    local expected_config_sha256="$1"
+    local expected_db_version="$2"
+    local failures=0
+    local installed_version
+    local config_sha256_after
+    local db_version_after
+
+    echo
+    echo "WAPT Server post-upgrade check"
+    echo "====================================================="
+
+    installed_version="$(dpkg-query -W -f='${Version}' "$TARGET_PACKAGE" 2>/dev/null || true)"
+
+    if [ "$installed_version" = "$TARGET_VERSION" ]; then
+        ok "Installed WAPT version: $installed_version"
+    else
+        block "Unexpected installed WAPT version: ${installed_version:-not installed}"
+        failures=$((failures + 1))
+    fi
+
+    if [ -f "$WAPT_CONFIG" ]; then
+        config_sha256_after="$(sha256sum "$WAPT_CONFIG" | awk '{print $1}')"
+        if [ "$config_sha256_after" = "$expected_config_sha256" ]; then
+            ok "WAPT configuration preserved"
+        else
+            block "WAPT configuration changed during upgrade"
+            failures=$((failures + 1))
+        fi
+    else
+        block "WAPT configuration missing after upgrade"
+        failures=$((failures + 1))
+    fi
+
+    for service in waptserver wapttasks nginx; do
+        if systemctl is-active --quiet "$service"; then
+            ok "Service $service active"
+        else
+            block "Service $service inactive"
+            failures=$((failures + 1))
+        fi
+    done
+
+    db_version_after="$(runuser -u postgres -- psql \
+        -p "$WAPT_DB_PORT" -d wapt -Atc \
+        "SELECT value FROM serverattribs WHERE key='db_version';" 2>/dev/null || true)"
+
+    if [ "$db_version_after" = "$expected_db_version" ]; then
+        ok "Database schema preserved: $db_version_after"
+    else
+        block "Database schema changed: ${db_version_after:-unavailable}"
+        failures=$((failures + 1))
+    fi
+
+    echo "Database post-upgrade baseline:"
+    for table in \
+        hostgroups \
+        hostpackagesstatus \
+        hosts \
+        hostsoftwares \
+        packages \
+        waptusers
+    do
+        local count_after
+
+        count_after="$(runuser -u postgres -- psql \
+            -p "$WAPT_DB_PORT" -d wapt -Atc \
+            "SELECT count(*) FROM ${table};" 2>/dev/null || true)"
+
+        if [ "$count_after" = "${DB_COUNTS[$table]}" ]; then
+            ok "${table}=${count_after}"
+        else
+            block "${table}: before=${DB_COUNTS[$table]} after=${count_after:-unavailable}"
+            failures=$((failures + 1))
+        fi
+    done
+
+    if [ "$failures" -eq 0 ]; then
+        echo "POST-UPGRADE RESULT: PASS"
+        return 0
+    fi
+
+    echo "POST-UPGRADE RESULT: BLOCKED ($failures issue(s))"
+    return 1
+}
+
+upgrade() {
+    local deb="$1"
+    local config_sha256_before
+    local db_version_before
+
+    echo "WAPT Server Buster migration upgrade v${SCRIPT_VERSION}"
+    echo "====================================================="
+    echo
+
+    echo "[1/5] Running source precheck..."
+    if ! precheck; then
+        block "Upgrade aborted: source precheck failed"
+        return 1
+    fi
+
+    config_sha256_before="$CONFIG_SHA256"
+    db_version_before="$DB_VERSION"
+
+    echo
+    echo "[2/5] Looking for a valid backup..."
+    if ! find_valid_backup; then
+        block "Upgrade aborted: no valid backup found"
+        return 1
+    fi
+    ok "Valid backup: $VALID_BACKUP"
+
+    echo
+    echo "[3/5] Validating target package..."
+    if ! validate_target_package "$deb"; then
+        block "Upgrade aborted: target package validation failed"
+        return 1
+    fi
+
+    echo
+    echo "====================================================="
+    echo "UPGRADE VALIDATION: PASS"
+    echo "Source build: ${SOURCE_BUILD}"
+    echo "Target build: ${TARGET_BUILD}"
+    echo "Backup: $VALID_BACKUP"
+    echo "Package: $deb"
+
+    echo
+    echo "[4/5] Installing validated target package..."
+
+    if ! dpkg -i "$deb"; then
+        block "Upgrade failed during package installation"
+        return 1
+    fi
+
+    echo
+    echo "[5/5] Running post-upgrade checks..."
+
+    if ! postcheck_upgrade "$config_sha256_before" "$db_version_before"; then
+        block "Upgrade completed but post-upgrade checks failed"
+        echo "[RECOVERY] Verified backup: $VALID_BACKUP"
+        echo "[RECOVERY] Automatic rollback was NOT attempted"
+        return 1
+    fi
+
+    echo
+    echo "====================================================="
+    echo "UPGRADE RESULT: PASS"
+    echo "${SOURCE_BUILD} -> ${TARGET_BUILD}"
+    return 0
+
+}
+
+usage() {
+    echo "Usage: $0 {precheck|backup|check-backup|check-package <deb>|upgrade <deb>}"
+}
+
+case "${1:-precheck}" in
+    precheck)
+        precheck
+        ;;
+    backup)
+        backup
+        ;;
+    check-backup)
+        if find_valid_backup; then
+            echo "[ OK ] Valid backup found: $VALID_BACKUP"
+            exit 0
+        else
+            echo "[BLOCK] No valid backup found"
+            exit 1
+        fi
+        ;;
+    check-package)
+        [ -n "${2:-}" ] || {
+            echo "[BLOCK] Missing target package path"
+            exit 2
+        }
+        validate_target_package "$2"
+        exit $?
+        ;;
+    upgrade)
+        [ -n "${2:-}" ] || {
+            echo "[BLOCK] Missing target package path"
+            exit 2
+        }
+        upgrade "$2"
+        exit $?
+        ;;
+    *)
+        usage
+        exit 2
+        ;;
+esac

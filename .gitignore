@@ -113,3 +113,5 @@ waptsetup/waptsetuputil/lib
 /waptself/*.exe
 /waptself/lib
 .gitmodules
+# Local build artifacts
+/build/
