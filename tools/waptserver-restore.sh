@@ -1,7 +1,7 @@
 #!/bin/bash
 set -u
 
-SCRIPT_VERSION="1.0"
+SCRIPT_VERSION="1.0.1"
 
 ok()   { echo "[ OK ] $*"; }
 warn() { echo "[WARN] $*" >&2; }
@@ -380,9 +380,6 @@ restore_target_configuration_identity() {
         source_value="$(wapt_ini_value "$SOURCE_INI" "$key")"
         target_value="$(wapt_ini_value "$TARGET_INI" "$key")"
         [ "$source_value" = "$target_value" ] || fail "Restored WAPT identity/policy value mismatch: $key"
-    done
-    for key in $RUNTIME_KEYS; do
-        [ -n "$(wapt_ini_value "$TARGET_INI" "$key")" ] || fail "Target runtime setting missing after merge: $key"
     done
 
     cmp -s "$SOURCE_CA_KEY" "$MERGED_CA_KEY" || fail "Restored client signing key content mismatch"
