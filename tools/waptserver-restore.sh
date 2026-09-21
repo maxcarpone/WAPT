@@ -1,24 +1,137 @@
 #!/bin/bash
 set -u
 
-SCRIPT_VERSION="0.1.5"
+SCRIPT_VERSION="0.3.1"
 
 ok()   { echo "[ OK ] $*"; }
 warn() { echo "[WARN] $*" >&2; }
 fail() { echo "[FAIL] $*" >&2; exit 1; }
 
+create_target_safety_backup() {
+    SAFETY_ROOT="/var/www/wapt-backups"
+    SAFETY_STAMP="$(date +%Y%m%d-%H%M%S)"
+    SAFETY_NAME="wapt-target-safety-${HOSTNAME:-unknown}-${SAFETY_STAMP}"
+    SAFETY_WORK="$(mktemp -d "${SAFETY_ROOT}/.${SAFETY_NAME}.XXXXXX")" || \
+        fail "Unable to create target safety-backup staging directory"
+    SAFETY_ARCHIVE="${SAFETY_ROOT}/${SAFETY_NAME}.tar"
+
+    chmod 0700 "$SAFETY_WORK" || fail "Unable to secure safety-backup staging directory"
+    mkdir -p \
+        "$SAFETY_WORK/database" \
+        "$SAFETY_WORK/config" \
+        "$SAFETY_WORK/metadata" \
+        "$SAFETY_WORK/package-owned"
+    chmod 0700 \
+        "$SAFETY_WORK/database" \
+        "$SAFETY_WORK/config" \
+        "$SAFETY_WORK/metadata" \
+        "$SAFETY_WORK/package-owned"
+
+    echo "Creating lightweight target safety backup..."
+    echo "Repository payload is intentionally NOT copied."
+
+    (cd / && runuser -u postgres -- \
+        pg_dump -p "$TARGET_PG_PORT" -Fc wapt) > "$SAFETY_WORK/database/wapt.dump" || \
+        fail "Target safety database dump failed"
+    [ -s "$SAFETY_WORK/database/wapt.dump" ] || fail "Target safety database dump is empty"
+    pg_restore -l "$SAFETY_WORK/database/wapt.dump" >/dev/null 2>&1 || \
+        fail "Target safety database dump is not readable"
+
+    if [ -d /opt/wapt/conf ]; then
+        tar -C / -cf "$SAFETY_WORK/config/opt-wapt-conf.tar" opt/wapt/conf || \
+            fail "Unable to save target /opt/wapt/conf"
+    fi
+    if [ -d /opt/wapt/waptserver/ssl ]; then
+        tar -C / -cf "$SAFETY_WORK/config/server-tls.tar" opt/wapt/waptserver/ssl || \
+            fail "Unable to save target server TLS directory"
+    fi
+    if [ -f /etc/nginx/sites-available/wapt.conf ]; then
+        cp -a /etc/nginx/sites-available/wapt.conf "$SAFETY_WORK/config/nginx-wapt.conf" || \
+            fail "Unable to save target nginx WAPT configuration"
+    elif [ -f /etc/nginx/sites-enabled/wapt.conf ]; then
+        cp -a /etc/nginx/sites-enabled/wapt.conf "$SAFETY_WORK/config/nginx-wapt.conf" || \
+            fail "Unable to save target nginx WAPT configuration"
+    fi
+
+    for f in /var/www/wapt/waptsetup-tis.exe /var/www/wapt/waptdeploy.exe; do
+        if [ -f "$f" ]; then
+            cp -a "$f" "$SAFETY_WORK/package-owned/" || \
+                fail "Unable to save target package-owned artifact: $f"
+        fi
+    done
+
+    {
+        echo "created=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+        echo "hostname=${HOSTNAME:-unknown}"
+        echo "debian=${TARGET_DEBIAN}"
+        echo "waptserver=${TARGET_WAPT}"
+        echo "waptsetup=${TARGET_SETUP}"
+        echo "postgresql=${TARGET_PG_VERSION}"
+        echo "pg_cluster=${TARGET_PG_MAJOR}/${TARGET_PG_CLUSTER}"
+        echo "pg_port=${TARGET_PG_PORT}"
+        echo "db_owner=${TARGET_DB_OWNER}"
+        echo "db_marker=${TARGET_DB_MARKER}"
+        echo "repository_payload_copied=no"
+    } > "$SAFETY_WORK/metadata/target.txt"
+
+    if [ -d /var/www/wapt ]; then
+        find /var/www/wapt -type f \
+            -printf '%m|%u|%g|%s|%p\n' | sort \
+            > "$SAFETY_WORK/metadata/repository-inventory.txt" || \
+            fail "Unable to inventory target repository"
+    else
+        : > "$SAFETY_WORK/metadata/repository-inventory.txt"
+    fi
+
+    find "$SAFETY_WORK" -type d -exec chmod 0700 {} + || \
+        fail "Unable to secure safety-backup directories"
+    find "$SAFETY_WORK" -type f -exec chmod 0600 {} + || \
+        fail "Unable to secure safety-backup files"
+
+    tar -C "$SAFETY_ROOT" -cf "$SAFETY_ARCHIVE" "$(basename "$SAFETY_WORK")" || \
+        fail "Unable to create target safety-backup archive"
+    chmod 0600 "$SAFETY_ARCHIVE" || fail "Unable to secure target safety-backup archive"
+
+    tar -tf "$SAFETY_ARCHIVE" >/dev/null || fail "Target safety-backup archive is not readable"
+    tar -xOf "$SAFETY_ARCHIVE" "$(basename "$SAFETY_WORK")/database/wapt.dump" \
+        | pg_restore -l >/dev/null 2>&1 || \
+        fail "Database dump inside target safety-backup archive is not readable"
+
+    rm -rf -- "$SAFETY_WORK"
+    SAFETY_WORK=""
+
+    ok "Target safety backup created and structurally validated"
+    echo "Target safety backup: $SAFETY_ARCHIVE"
+    echo "NOTE: repository package payload is not included in this safety backup."
+}
+
 usage() {
-    echo "Usage: $0 --check /path/to/wapt-dr-*.tar"
+    echo "Usage: $0 {--check|--restore} /path/to/wapt-dr-*.tar"
     exit 2
 }
 
 [ "$#" -eq 2 ] || usage
-[ "$1" = "--check" ] || usage
+
+MODE="$1"
 ARCHIVE="$2"
 
-echo "WAPT Server DR restore check v${SCRIPT_VERSION}"
+case "$MODE" in
+    --check|--restore) ;;
+    *) usage ;;
+esac
+
+if [ "$MODE" = "--restore" ] && [ "$(id -u)" -ne 0 ]; then
+    command -v sudo >/dev/null 2>&1 || fail "Root privileges are required for --restore and sudo is not available"
+    exec sudo -- "$0" "$@"
+fi
+
+echo "WAPT Server DR restore v${SCRIPT_VERSION}"
 echo "=================================================="
-echo "Mode: CHECK ONLY — no target WAPT data will be modified"
+if [ "$MODE" = "--check" ]; then
+    echo "Mode: CHECK ONLY — no target WAPT data will be modified"
+else
+    echo "Mode: RESTORE — validation phase only"
+fi
 echo
 
 for tool in tar sha256sum awk grep sed find wc mktemp pg_restore df stat sort; do
@@ -253,6 +366,111 @@ pg_restore -l "$BUNDLE/database/wapt.dump" >/dev/null 2>&1 || \
     fail "Database dump is not a valid pg_restore custom-format archive"
 ok "Database dump is readable by pg_restore"
 
+if [ "$MODE" = "--restore" ]; then
+    echo
+    echo "Validating restore target..."
+
+    for tool in dpkg-query pg_lsclusters psql runuser systemctl; do
+        command -v "$tool" >/dev/null 2>&1 || fail "Required restore tool missing: $tool"
+        ok "Restore tool available: $tool"
+    done
+
+    [ -r /etc/os-release ] || fail "Unable to read /etc/os-release"
+    . /etc/os-release
+    TARGET_DEBIAN="${VERSION_ID:-}"
+    [ -n "$TARGET_DEBIAN" ] || fail "Unable to determine target Debian version"
+
+    TARGET_WAPT="$(dpkg-query -W -f='${Version}' tis-waptserver 2>/dev/null)" || \
+        fail "Target package tis-waptserver is not installed"
+    TARGET_SETUP="$(dpkg-query -W -f='${Version}' tis-waptsetup 2>/dev/null)" || \
+        fail "Target package tis-waptsetup is not installed"
+
+    systemctl is-active --quiet postgresql || fail "Target PostgreSQL service is not active"
+    systemctl is-active --quiet waptserver || fail "Target waptserver service is not active"
+
+    TARGET_CLUSTERS="$(pg_lsclusters --no-header 2>/dev/null | awk '$4=="online" {print $1 "|" $2 "|" $3 "|" $4 "|" $5}')"
+    TARGET_CLUSTER_COUNT="$(printf '%s\n' "$TARGET_CLUSTERS" | awk 'NF {n++} END {print n+0}')"
+    [ "$TARGET_CLUSTER_COUNT" -ge 1 ] || fail "No online PostgreSQL cluster found on target"
+
+    TARGET_WAPT_CLUSTERS=""
+    while IFS='|' read -r pg_major pg_cluster pg_port pg_status pg_owner; do
+        [ -n "$pg_major" ] || continue
+        if (cd / && runuser -u postgres -- \
+            psql -p "$pg_port" -d wapt -Atqc "SELECT 1;" >/dev/null 2>&1); then
+            TARGET_WAPT_CLUSTERS="${TARGET_WAPT_CLUSTERS}${pg_major}|${pg_cluster}|${pg_port}|${pg_status}|${pg_owner}
+"
+        fi
+    done <<EOF
+$TARGET_CLUSTERS
+EOF
+
+    TARGET_WAPT_CLUSTER_COUNT="$(printf '%s\n' "$TARGET_WAPT_CLUSTERS" | awk 'NF {n++} END {print n+0}')"
+    [ "$TARGET_WAPT_CLUSTER_COUNT" -eq 1 ] || \
+        fail "Expected exactly one online PostgreSQL cluster containing database wapt, found $TARGET_WAPT_CLUSTER_COUNT"
+
+    TARGET_PG_MAJOR="$(printf '%s\n' "$TARGET_WAPT_CLUSTERS" | awk -F'|' 'NF {print $1; exit}')"
+    TARGET_PG_CLUSTER="$(printf '%s\n' "$TARGET_WAPT_CLUSTERS" | awk -F'|' 'NF {print $2; exit}')"
+    TARGET_PG_PORT="$(printf '%s\n' "$TARGET_WAPT_CLUSTERS" | awk -F'|' 'NF {print $3; exit}')"
+    TARGET_PG_OWNER="$(printf '%s\n' "$TARGET_WAPT_CLUSTERS" | awk -F'|' 'NF {print $5; exit}')"
+
+    [ "$TARGET_PG_OWNER" = "postgres" ] || \
+        fail "Target PostgreSQL cluster owner is not postgres: $TARGET_PG_OWNER"
+
+    TARGET_DB_RUNTIME="$(cd / && runuser -u postgres -- \
+        psql -p "$TARGET_PG_PORT" -d wapt -Atqc \
+        "SELECT current_database(), current_setting('server_version'), current_setting('port');" \
+        2>/dev/null)" || fail "Unable to connect to target WAPT database"
+
+    TARGET_DB_NAME="$(printf '%s\n' "$TARGET_DB_RUNTIME" | awk -F'|' 'NR==1 {print $1}')"
+    TARGET_PG_VERSION="$(printf '%s\n' "$TARGET_DB_RUNTIME" | awk -F'|' 'NR==1 {print $2}')"
+    TARGET_DB_PORT="$(printf '%s\n' "$TARGET_DB_RUNTIME" | awk -F'|' 'NR==1 {print $3}')"
+
+    [ "$TARGET_DB_NAME" = "wapt" ] || fail "Unexpected target database name: $TARGET_DB_NAME"
+    [ "$TARGET_DB_PORT" = "$TARGET_PG_PORT" ] || \
+        fail "Target PostgreSQL port mismatch between cluster and database runtime"
+
+    TARGET_DB_OWNER="$(cd / && runuser -u postgres -- \
+        psql -p "$TARGET_PG_PORT" -d postgres -Atqc \
+        "SELECT pg_get_userbyid(datdba) FROM pg_database WHERE datname='wapt';" \
+        2>/dev/null)" || fail "Unable to determine target WAPT database owner"
+    [ "$TARGET_DB_OWNER" = "wapt" ] || \
+        fail "Target WAPT database owner is not wapt: ${TARGET_DB_OWNER:-missing}"
+
+    TARGET_DB_MARKER="$(cd / && runuser -u postgres -- \
+        psql -p "$TARGET_PG_PORT" -d wapt -Atqc \
+        "SELECT value FROM serverattribs WHERE key='db_version';" \
+        2>/dev/null)" || fail "Unable to read target WAPT database marker"
+    [ -n "$TARGET_DB_MARKER" ] || fail "Target WAPT database marker is empty"
+
+    echo
+    echo "Target Debian:          $TARGET_DEBIAN"
+    echo "Target WAPT server:     $TARGET_WAPT"
+    echo "Target WAPT setup:      $TARGET_SETUP"
+    echo "Target PostgreSQL:      $TARGET_PG_VERSION"
+    echo "Target PG cluster:      $TARGET_PG_MAJOR/$TARGET_PG_CLUSTER"
+    echo "Target PostgreSQL port: $TARGET_PG_PORT"
+    echo "Target DB owner:        $TARGET_DB_OWNER"
+    echo "Target DB marker:       $TARGET_DB_MARKER"
+    echo
+    ok "Restore target precheck passed"
+fi
+
 echo
-echo "CHECK PASSED"
-echo "No target WAPT data was modified."
+if [ "$MODE" = "--check" ]; then
+    echo "CHECK PASSED"
+    echo "No target WAPT data was modified."
+else
+    echo "RESTORE PRECHECK PASSED"
+    echo
+    [ "$(id -u)" -eq 0 ] || fail "Root privileges are required to create the target safety backup"
+    [ -d /var/www/wapt-backups ] || mkdir -p /var/www/wapt-backups
+    chmod 0700 /var/www/wapt-backups || fail "Unable to secure /var/www/wapt-backups"
+
+    create_target_safety_backup
+
+    echo
+    echo "SAFETY BACKUP PASSED"
+    echo "Destructive restore operations are not implemented yet in v${SCRIPT_VERSION}."
+    echo "Target database, configuration and repository were NOT replaced."
+    exit 3
+fi
