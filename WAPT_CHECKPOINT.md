@@ -3664,20 +3664,52 @@ The validated historical WAPT TLS certificate expires on 2027-12-03 and must
 be renewed or replaced before that date while preserving the WAPT service
 FQDN semantics.
 
-The next milestone is:
+The validated Debian and Windows lineages have now been reunified on
+`release/1.8.3`.
 
-    REUNIFY THE VALIDATED DEBIAN AND WINDOWS LINEAGES FOR WAPT 1.8.3
+The current validation milestone is:
+
+    VALIDATE WAPT 1.8.3 ON DEBIAN 10 BEFORE CONSOLIDATED RELEASE
+
+### Debian 10 - validation initiale WAPT 1.8.3 / DB 1.8.3.0
+
+Test package:
+- tis-waptserver-1.8.3.7436-2377932b-debian-10-amd64
+- SHA256: cef587f768f176d212faebfddeabcda2f7385ed38b16bca23717930fea750c83
+- source commit: 2377932b1
+- natural Git build count: 7436
+
+Validated on Debian 10.13:
+
+1. Upgrade from fresh WAPT 1.8.2.7398:
+   - initial DB marker: 1.8.2
+   - package upgrade to 1.8.3.7436: PASS
+   - postconf: PASS
+   - final DB marker: 1.8.3.0
+   - waptserver, wapttasks, PostgreSQL and nginx active
+
+2. Fresh installation:
+   - pristine Debian 10.13
+   - direct installation of WAPT 1.8.3.7436: PASS
+   - postconf: PASS
+   - new DB initialized directly at 1.8.3.0
+   - waptserver, wapttasks, PostgreSQL and nginx active
+
+3. Idempotence:
+   - postconf.sh executed again
+   - DB marker remained 1.8.3.0: PASS
+
+Next validation:
+- authentic historical DB migration 1.8.2.1 -> 1.8.3.0
 
 Resume in this order:
 
-    1. Reunify the validated Debian and Windows source lineages.
-    2. Prepare the first consolidated autonomous release as 1.8.3.
-    3. Implement the explicit DB marker migration to at least 1.8.3.0.
-    4. Build all server/setup/client artifacts from the common release state.
-    5. Re-evaluate final Windows Authenticode signing.
-    6. Validate authentic 7393 -> 1.8.3 migration.
-    7. Only after the consolidated Debian 10 release is validated, begin the
-       Debian 11 phase.
+    1. Validate authentic historical DB migration from 1.8.2.1 to 1.8.3.0.
+    2. Build all server/setup/client artifacts from the common 1.8.3 release state.
+    3. Re-evaluate final Windows Authenticode signing and product identity/branding.
+    4. Validate authentic WAPT 1.8.2.7393 -> 1.8.3 migration, including historical client upgrade.
+    5. Freeze the first consolidated autonomous WAPT 1.8.3 release.
+    6. Only after the consolidated Debian 10 release is validated, begin Debian 11.
 
 Do not begin Debian 11 before the 1.8.3 consolidation milestone is closed.
 
