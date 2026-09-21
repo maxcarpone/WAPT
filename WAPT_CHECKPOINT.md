@@ -1,6 +1,6 @@
 # WAPT 1.8.2 Modernization â€” Technical Checkpoint
 
-**Checkpoint date:** 2026-09-18
+**Checkpoint date:** 2026-09-21
 **Purpose:** authoritative save-state for resuming the WAPT Community modernization project without replaying the historical conversation.
 
 ## 1. Project objective
@@ -2793,4 +2793,391 @@ Considère WAPT_CHECKPOINT.md comme l'état technique faisant autorité.
 Ne recommence pas les investigations déjà validées sauf si une contradiction apparaît.
 On reprend à la section "Exact next action".
 Réponses courtes, une étape à la fois.
+```
+## 34. Restore target safety backup — V0.3.1 validated and committed (2026-09-21)
+
+Development resumed from the V0.3 candidate described in section 32.
+
+The first real V0.3 `--restore` run completed all archive and target prechecks,
+then created the lightweight target safety backup, but failed only during its
+final embedded-dump readability check:
+
+``` text
+[FAIL] Database dump inside target safety-backup archive is not readable
+```
+
+The safety archive itself was valid. The defect was the validation command:
+
+``` text
+tar -xOf .../wapt.dump | pg_restore -l -
+```
+
+In this context `pg_restore -l -` treated `-` as an input filename rather than
+reading the archive from standard input. Independent checks proved both the
+staged dump and the dump streamed from the generated tar were readable.
+
+V0.3.1 changed only:
+
+``` text
+SCRIPT_VERSION="0.3" -> "0.3.1"
+pg_restore -l -      -> pg_restore -l
+```
+
+Validated V0.3.1 SHA256:
+
+``` text
+40c927865dd0a6e6062a423a24b53c7dbe0d95fd7158370a62b8df5ce8335c5a
+```
+
+The successful V0.3.1 run on isolated `wapt-deb10` produced:
+
+``` text
+/var/www/wapt-backups/wapt-target-safety-wapt-deb10-20260921-092815.tar
+```
+
+Validation result:
+
+``` text
+RESTORE PRECHECK PASSED
+Target safety backup created and structurally validated
+SAFETY BACKUP PASSED
+```
+
+Post-run checks confirmed:
+
+``` text
+safety archive size: about 45 MiB
+archive mode:        0600 root:root
+staging residue:     none
+free space /var/www: about 20 GiB
+waptserver:          active
+postgresql:          active
+nginx:               active
+```
+
+The lightweight archive contains critical mutable target state but deliberately
+does not contain repository package payload. It includes the logical WAPT DB
+dump, WAPT configuration, server TLS material, nginx WAPT configuration when
+present, target metadata, repository inventory and target
+`waptsetup-tis.exe`/`waptdeploy.exe` when present.
+
+The exact validated restore script was committed and pushed on
+`build/debian10-buster`:
+
+``` text
+c7f98b36 Add validated target safety backup to WAPT DR restore
+```
+
+The previous V0.3 failed-test archive was retained as diagnostic evidence; its
+temporary staging directory was removed.
+
+## 35. Controlled logical database restore — V0.4.4 validated and committed (2026-09-21)
+
+The next restore milestone deliberately implemented only the destructive
+database phase, retaining a hard stop before configuration, certificates,
+nginx and repository restoration.
+
+The intended sequence was:
+
+``` text
+validated archive/target prechecks
+-> validated lightweight target safety backup
+-> stop WAPT application services
+-> keep PostgreSQL active
+-> replace logical WAPT database on detected target PostgreSQL cluster/port
+-> targeted ownership/schema ACL repair
+-> validate DB marker and essential table counts
+-> STOP BARRIER before config/identity/repository restore
+```
+
+Target PostgreSQL remained authoritative:
+
+``` text
+target PostgreSQL: 11/main
+target port:       5432
+source PostgreSQL: 9.6 / 5432 (metadata only)
+```
+
+### 35.1 V0.4/V0.4.1 PostgreSQL 11 compatibility finding
+
+Before destructive execution, the sequence-owner validation was checked on the
+real PostgreSQL 11 target. PostgreSQL 11 does not expose
+`sequence_owner` through `information_schema.sequences`.
+
+The validation was corrected to use:
+
+``` text
+pg_class
+pg_namespace
+pg_get_userbyid(c.relowner)
+```
+
+The corrected query was tested directly on PostgreSQL 11 and returned zero
+non-WAPT-owned public sequences.
+
+V0.4.1 SHA256:
+
+``` text
+4dc1bcebf66e406ace9812f915b54762818e9e267668cb10af841007248e386b
+```
+
+### 35.2 First destructive run — controlled failure and root cause
+
+V0.4.1 successfully:
+
+``` text
+created/validated a new target safety backup
+stopped WAPT application services
+kept PostgreSQL active
+dropped/recreated database wapt
+removed the default public schema
+```
+
+It then failed before importing any dump data:
+
+``` text
+pg_restore: could not open input file .../database/wapt.dump: Permission denied
+[FAIL] Database restore failed
+```
+
+The extracted DR staging tree is intentionally private to root. The
+`postgres` user therefore could not traverse the root-owned staging path to
+open the dump directly.
+
+This did **not** justify weakening staging permissions. The design was fixed
+instead so root reads the protected dump and streams it to `pg_restore`
+running as `postgres`:
+
+``` text
+root-readable dump -> stdin -> pg_restore as postgres
+```
+
+V0.4.2 implemented this change.
+
+After the V0.4.1 interruption:
+
+``` text
+waptserver: inactive
+wapttasks:  failed/stopped
+postgresql: active
+nginx:      active
+database wapt: exists, 0 public tables
+```
+
+The pre-failure safety backup was preserved:
+
+``` text
+/var/www/wapt-backups/wapt-target-safety-wapt-deb10-20260921-094608.tar
+```
+
+### 35.3 Controlled interrupted-restore recovery
+
+V0.4.2 initially could not resume because the normal target precheck required
+`waptserver` to be active.
+
+V0.4.3 added a deliberately narrow recovery rule:
+
+``` text
+if waptserver is inactive:
+    detect the real target PostgreSQL WAPT database;
+    require exactly 0 public tables;
+    only then accept the state as an interrupted database restore.
+```
+
+It does not broadly permit restoring over an arbitrary inactive WAPT server.
+
+The first V0.4.3 resume correctly recognized:
+
+``` text
+waptserver inactive
+target database has 0 public tables
+interrupted restore state accepted
+```
+
+It then stopped during the normal target DB-marker check because an empty
+interrupted database has no `serverattribs` table.
+
+V0.4.4 therefore skips the **target pre-restore marker** only after the exact
+empty interrupted-restore state above has already been accepted. The source
+marker remains validated from the DR archive, and the restored marker is still
+required and validated after `pg_restore`.
+
+Validated V0.4.4 SHA256:
+
+``` text
+7cfbefc52e5dafaf39a119a30c81ca485af54fd2298039a24cbe2556f27fc842
+```
+
+### 35.4 V0.4.4 destructive DB restore — PASS
+
+The V0.4.4 resume completed successfully.
+
+A fresh lightweight target safety backup was created and validated:
+
+``` text
+/var/www/wapt-backups/wapt-target-safety-wapt-deb10-20260921-101625.tar
+```
+
+The logical database was restored into:
+
+``` text
+PostgreSQL cluster: 11/main
+port:               5432
+database owner:     wapt
+```
+
+The restore used `pg_restore --no-owner` as PostgreSQL superuser, followed by
+targeted WAPT ownership corrections and:
+
+``` sql
+GRANT USAGE, CREATE ON SCHEMA public TO wapt;
+```
+
+No global `REASSIGN OWNED BY postgres TO wapt` was used.
+
+Post-restore validation:
+
+``` text
+DB marker:           "1.8.2.1"
+
+hostgroups:          3623
+hostpackagesstatus:  25101
+hosts:               675
+hostsoftwares:       105247
+packages:            1056
+waptusers:           1
+```
+
+The script reported:
+
+``` text
+[ OK ] Logical database restore completed
+[ OK ] Restored database ownership, schema ACL, marker and essential tables validated
+
+DATABASE RESTORE PASSED
+```
+
+The result matches the evolved 7398 backup baseline established by Backup
+V1.0.
+
+At the intentional stop barrier:
+
+``` text
+waptserver/wapttasks remain stopped
+PostgreSQL remains active
+target configuration not yet restored
+target certificates/TLS not yet restored
+target nginx configuration not replaced
+target repository not yet restored
+```
+
+Temporary restore staging cleanup was also validated:
+
+``` text
+find /var/www -maxdepth 1 -name '.wapt-dr-restore-*'
+-> no output
+```
+
+The protected root-only staging permissions were **not** weakened. The
+permission issue was solved by streaming the DB dump rather than granting
+`postgres` access to the staging tree.
+
+The exact validated script was committed and pushed:
+
+``` text
+cbc158fc Add validated WAPT database restore phase
+branch: build/debian10-buster
+```
+
+Current Wapster tracked state after push is clean. Its old duplicate checkpoint
+remains intentionally untracked:
+
+``` text
+?? WAPT_CHECKPOINT.md
+```
+
+Do not commit that Wapster duplicate. VM106 remains the authoritative
+checkpoint working tree.
+
+## 36. Exact next action — post-V0.4.4 database barrier
+
+The current `wapt-deb10` restore is intentionally paused after successful
+database replacement.
+
+Current known state:
+
+``` text
+database:            restored and validated from evolved 7398 DR archive
+DB marker:           "1.8.2.1"
+PostgreSQL 11/main:  active on 5432
+waptserver:          stopped
+wapttasks:           stopped/failed state from controlled stop
+nginx:               active
+config/identity:     not yet restored by the automated restore tool
+repository:          not yet restored by the automated restore tool
+```
+
+Do **not** restart WAPT services yet. The database is historical/restored while
+the remaining target configuration/identity/repository layers have not yet
+been applied by the automated restore sequence.
+
+The immediate implementation milestone is:
+
+``` text
+SELECTIVE CONFIGURATION / IDENTITY / REPOSITORY RESTORE
+```
+
+Proceed incrementally:
+
+``` text
+1. Preserve V0.4.4 / commit cbc158fc as the validated DB-restore rollback point.
+2. Implement selective waptserver.ini restoration:
+     - preserve target runtime/path/technical authority;
+     - restore historical identity/policy values deliberately.
+3. Restore historical client CA and server TLS identity deliberately.
+4. Keep target nginx configuration authoritative; historical nginx config is
+   reference material only.
+5. Restore repository content from the DR archive while preserving target:
+     waptsetup-tis.exe
+     waptdeploy.exe
+6. Reapply deliberate operational permissions:
+     repository directories 0750 wapt:www-data
+     repository files       0640 wapt:www-data
+     /opt/wapt/conf         0750 wapt:root
+     waptserver.ini         0640
+     client CA certificate  0644
+     client CA private key  0640
+     server TLS directory   0750 root:root
+     server TLS certificate 0644
+     server TLS private key 0600
+7. Validate restored configuration/identity/repository before restarting WAPT.
+8. Restart services in controlled order and validate PostgreSQL, WAPT, nginx,
+   HTTPS and repository access.
+9. Emit the final administrative report/reminders:
+     - historical package-signing private key remains external;
+     - review authorized package certificates;
+     - verify historical package prefix (`0790007d`);
+     - regenerate `waptagent.exe` from the current console;
+     - generate/publish the current `<prefix>-waptupgrade`;
+     - validate at least one historical client.
+10. Complete an end-to-end evolved-7398 restore validation.
+11. Only after the complete restore passes, promote restore tooling toward V1.0
+    and freeze Debian 10 DR.
+12. Then add/finalize the post-DR modernization roadmap and consolidate the
+    first autonomous release as 1.8.3.1.
+13. Do not begin Debian 11 yet.
+```
+
+Important continuity rules remain unchanged:
+
+``` text
+true production scrab remains untouched
+scrab-clone remains isolated on vmbr999 with no default route
+large restore staging belongs under /var/www, never /tmp
+source PostgreSQL version/port are metadata only
+target PostgreSQL cluster/port are detected dynamically
+safety backup does not duplicate repository payload
+target waptsetup-tis.exe and waptdeploy.exe remain authoritative
+Wapster's untracked WAPT_CHECKPOINT.md is not authoritative
+VM106 C:\git\waptdev\WAPT_CHECKPOINT.md remains authoritative
 ```
