@@ -1,7 +1,7 @@
 #!/bin/bash
 set -u
 
-SCRIPT_VERSION="0.6.2"
+SCRIPT_VERSION="0.7.2"
 
 ok()   { echo "[ OK ] $*"; }
 warn() { echo "[WARN] $*" >&2; }
@@ -548,6 +548,154 @@ restore_target_repository() {
     ok "Historical repository restored and validated; target setup/deploy executables preserved"
 }
 
+
+validate_and_start_services() {
+    echo
+    echo "=================================================="
+    echo "SERVICE / FQDN / TLS VALIDATION PHASE"
+    echo "=================================================="
+
+    TARGET_NGINX_CONF="/etc/nginx/sites-available/wapt.conf"
+    [ -f "$TARGET_NGINX_CONF" ] || fail "Target nginx WAPT configuration is missing: $TARGET_NGINX_CONF"
+
+    TARGET_TLS_CERT="$(sed -n -E 's/^[[:space:]]*ssl_certificate[[:space:]]+"?([^";]+)"?;.*/\1/p' "$TARGET_NGINX_CONF" | head -n 1)"
+    TARGET_TLS_KEY="$(sed -n -E 's/^[[:space:]]*ssl_certificate_key[[:space:]]+"?([^";]+)"?;.*/\1/p' "$TARGET_NGINX_CONF" | head -n 1)"
+    [ -f "$TARGET_TLS_CERT" ] || fail "Target TLS certificate is missing: ${TARGET_TLS_CERT:-unknown}"
+    [ -f "$TARGET_TLS_KEY" ] || fail "Target TLS key is missing: ${TARGET_TLS_KEY:-unknown}"
+
+    TLS_PUB_CERT="$(openssl x509 -in "$TARGET_TLS_CERT" -pubkey -noout 2>/dev/null | openssl pkey -pubin -outform pem 2>/dev/null)" || \
+        fail "Unable to read public key from restored TLS certificate"
+    TLS_PUB_KEY="$(openssl pkey -in "$TARGET_TLS_KEY" -pubout -outform pem 2>/dev/null)" || \
+        fail "Unable to read public key from restored TLS private key"
+    [ "$TLS_PUB_CERT" = "$TLS_PUB_KEY" ] || fail "Restored TLS certificate/private key do not match"
+    ok "Restored TLS certificate/private key match"
+
+    WAPT_SERVICE_FQDN="$(openssl x509 -in "$TARGET_TLS_CERT" -noout -subject -nameopt RFC2253 2>/dev/null | \
+        sed -n -E 's/^subject=.*CN=([^,]+).*$/\1/p' | head -n 1)"
+    [ -n "$WAPT_SERVICE_FQDN" ] || fail "Unable to derive historical WAPT service FQDN from restored TLS certificate CN"
+    case "$WAPT_SERVICE_FQDN" in
+        *.*) ;;
+        *) fail "Restored TLS certificate CN does not look like a FQDN: $WAPT_SERVICE_FQDN" ;;
+    esac
+    case "$WAPT_SERVICE_FQDN" in
+        *[!A-Za-z0-9.-]*) fail "Restored TLS certificate CN contains unsupported FQDN characters: $WAPT_SERVICE_FQDN" ;;
+    esac
+
+    TLS_NOT_AFTER="$(openssl x509 -in "$TARGET_TLS_CERT" -noout -enddate 2>/dev/null | sed 's/^notAfter=//')" || \
+        fail "Unable to read restored TLS certificate expiry"
+    openssl x509 -in "$TARGET_TLS_CERT" -noout -checkend 0 >/dev/null 2>&1 || \
+        fail "Restored TLS certificate is already expired"
+    ok "Restored TLS certificate is currently valid"
+
+    TARGET_OS_FQDN="$(hostname -f 2>/dev/null || hostname)"
+    echo
+    echo "Source OS FQDN:       ${SOURCE_FQDN:-unknown}"
+    echo "WAPT service FQDN:    $WAPT_SERVICE_FQDN"
+    echo "Target OS FQDN:       $TARGET_OS_FQDN"
+    echo "TLS certificate ends: $TLS_NOT_AFTER"
+
+    DNS_RESULT=""
+    if command -v getent >/dev/null 2>&1; then
+        DNS_RESULT="$(getent ahostsv4 "$WAPT_SERVICE_FQDN" 2>/dev/null | awk '{print $1}' | sort -u | tr '\n' ' ' | sed 's/[[:space:]]*$//')"
+    fi
+    if [ -n "$DNS_RESULT" ]; then
+        echo "Current DNS IPv4:     $DNS_RESULT"
+        warn "DNS result is informational only; this restore does not change DNS or authorize production-client reconnection"
+    else
+        echo "Current DNS IPv4:     <not resolved from this target>"
+        warn "Historical WAPT service FQDN does not currently resolve here; this is acceptable for an isolated DR validation"
+    fi
+
+    command -v nginx >/dev/null 2>&1 || fail "nginx command is unavailable"
+    nginx -t >/dev/null 2>&1 || fail "Target nginx configuration test failed"
+    ok "nginx configuration test passed"
+
+    systemctl is-active --quiet postgresql || fail "PostgreSQL is not active before WAPT service start"
+    systemctl is-active --quiet nginx || fail "nginx is not active before WAPT service start"
+
+    echo
+    echo "Starting/validating WAPT application services..."
+    if systemctl is-active --quiet waptserver; then
+        warn "waptserver is already active; accepting service-resume state"
+    else
+        systemctl start waptserver || fail "Unable to start waptserver"
+    fi
+
+    WAPTSERVER_READY="no"
+    for _attempt in 1 2 3 4 5 6 7 8 9 10; do
+        if systemctl is-active --quiet waptserver; then
+            WAPTSERVER_READY="yes"
+            break
+        fi
+        sleep 1
+    done
+    [ "$WAPTSERVER_READY" = "yes" ] || fail "waptserver did not become active within 10 seconds"
+    ok "waptserver is active"
+
+    if systemctl list-unit-files wapttasks.service 2>/dev/null | grep -q '^wapttasks\.service'; then
+        if systemctl is-active --quiet wapttasks; then
+            warn "wapttasks is already active; accepting service-resume state"
+        else
+            systemctl start wapttasks || fail "Unable to start wapttasks"
+        fi
+
+        WAPTTASKS_READY="no"
+        for _attempt in 1 2 3 4 5; do
+            if systemctl is-active --quiet wapttasks; then
+                WAPTTASKS_READY="yes"
+                break
+            fi
+            sleep 1
+        done
+        [ "$WAPTTASKS_READY" = "yes" ] || fail "wapttasks did not become active within 5 seconds"
+        ok "wapttasks is active"
+    else
+        warn "wapttasks.service is not installed; no wapttasks start attempted"
+    fi
+
+    command -v curl >/dev/null 2>&1 || fail "curl command is unavailable for local HTTPS validation"
+    echo
+    echo "Waiting for local WAPT HTTPS readiness (maximum 30 seconds)..."
+    LOCAL_HTTPS_CODE=""
+    HTTPS_READY="no"
+    for _attempt in $(seq 1 30); do
+        LOCAL_HTTPS_CODE="$(curl -k -sS -o /dev/null -w '%{http_code}' \
+            --resolve "${WAPT_SERVICE_FQDN}:443:127.0.0.1" \
+            "https://${WAPT_SERVICE_FQDN}/" 2>/dev/null || true)"
+        case "$LOCAL_HTTPS_CODE" in
+            2??|3??|401|403)
+                HTTPS_READY="yes"
+                break
+                ;;
+        esac
+        sleep 1
+    done
+    [ "$HTTPS_READY" = "yes" ] || \
+        fail "Local WAPT HTTPS endpoint did not become ready within 30 seconds (last status: ${LOCAL_HTTPS_CODE:-none})"
+    ok "Local HTTPS validation passed with HTTP status $LOCAL_HTTPS_CODE"
+
+    echo
+    echo "SERVICE / FQDN / TLS VALIDATION PASSED"
+    echo "The restored WAPT service is running locally with the historical TLS identity."
+    echo
+    echo "=================================================="
+    echo "PRE-PRODUCTION CUTOVER BARRIER"
+    echo "=================================================="
+    echo "Historical WAPT service FQDN: $WAPT_SERVICE_FQDN"
+    echo "Current target OS FQDN:       $TARGET_OS_FQDN"
+    echo "Current DNS IPv4:             ${DNS_RESULT:-<not resolved>}"
+    echo
+    echo "DO NOT reconnect production clients yet."
+    echo "DO NOT change production DNS as part of this script."
+    echo "Before production cutover, explicitly validate that:"
+    echo "  1. $WAPT_SERVICE_FQDN resolves to the intended restored production server;"
+    echo "  2. network/firewall/ACL rules permit the intended client traffic;"
+    echo "  3. the TLS identity presented for $WAPT_SERVICE_FQDN is the intended restored/renewed certificate;"
+    echo "  4. the WAPT console is used to regenerate waptagent.exe with the intended authorized certificate(s)."
+    echo
+    warn "TLS certificate renewal must be planned before: $TLS_NOT_AFTER"
+}
+
 usage() {
     echo "Usage: $0 {--check|--restore} /path/to/wapt-dr-*.tar"
     exit 2
@@ -577,7 +725,7 @@ else
 fi
 echo
 
-for tool in tar sha256sum awk grep sed find wc mktemp mkfifo pg_restore df stat sort install cmp hostname head; do
+for tool in tar sha256sum awk grep sed find wc mktemp mkfifo pg_restore df stat sort install cmp hostname head openssl curl; do
     command -v "$tool" >/dev/null 2>&1 || fail "Required tool missing: $tool"
     ok "Tool available: $tool"
 done
@@ -990,7 +1138,12 @@ else
     echo "waptserver/wapttasks remain stopped intentionally."
     echo "Target nginx configuration was preserved."
     echo "Safety backup retained at: $SAFETY_ARCHIVE"
+
+    validate_and_start_services
+
     echo
-    echo "STOP BARRIER: service restart and FQDN/DNS/TLS cutover validation are not implemented yet in v${SCRIPT_VERSION}."
+    echo "RESTORE VALIDATION PASSED"
+    echo "Database, configuration/identity, repository, TLS identity and local WAPT service startup are validated."
+    echo "Production DNS/client reconnection remains behind the explicit pre-production cutover barrier."
     exit 3
 fi
