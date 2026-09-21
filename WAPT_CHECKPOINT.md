@@ -3636,8 +3636,16 @@ distribution, explicitly choose and validate the production signing strategy.
 
 ## 43. Exact next action — new-thread resume point
 
-The automated restore itself is now validated through V0.7.2 / commit
-`bb05f691`.
+The validated Debian 10 DR restore tool is now frozen as V1.0.
+
+Restore V1.0:
+- script: `tools/waptserver-restore.sh`
+- commit: `50246dd1f95036ebb0b2a7cd27004deadac5a76a`
+- tag: `server-buster-restore-v1.0`
+- SHA256:
+  `06ff15a4b12b1c92b8f7885a5244e64a1859427093fbfcc19a986b77acdd2270`
+- V1.0 differs from validated V0.7.2 only by the `SCRIPT_VERSION`
+  promotion; no functional restore logic was changed.
 
 The next milestone is:
 
