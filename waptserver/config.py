@@ -21,7 +21,8 @@
 #
 # -----------------------------------------------------------------------
 from __future__ import absolute_import
-__version__ = "1.8.2"
+__version__ = "1.8.3"
+DB_VERSION = "1.8.3.0"
 
 import os
 import sys

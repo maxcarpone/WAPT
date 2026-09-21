@@ -35,7 +35,7 @@ import re
 
 from peewee import *
 from peewee import Function
-from waptserver.config import __version__
+from waptserver.config import __version__, DB_VERSION
 
 from playhouse.postgres_ext import *
 from playhouse.pool import PooledPostgresqlExtDatabase
@@ -1573,12 +1573,12 @@ def init_db(drop=False):
 
         if get_db_version() is None:
             # new database install, we setup the db_version key
-            set_db_version(__version__)
+            set_db_version(DB_VERSION)
 
-        if get_db_version() != __version__:
+        if get_db_version() != DB_VERSION:
             with wapt_db.atomic():
                 upgrade_db_structure()
-                set_db_version(__version__)
+                set_db_version(DB_VERSION)
 
         # be sure to have at least admin
         with wapt_db.atomic():
@@ -2106,8 +2106,16 @@ def upgrade_db_structure():
 
                 set_db_version(next_version)
 
-        if get_db_version() < __version__:
-            set_db_version(__version__)
+        next_version = '1.8.3.0'
+        if get_db_version() < next_version:
+            with wapt_db.atomic():
+                logger.info("Migrating from %s to %s" % (get_db_version(), next_version))
+
+                # WAPT 1.8.3 consolidated database baseline.
+                set_db_version(next_version)
+
+        if get_db_version() < DB_VERSION:
+            set_db_version(DB_VERSION)
 
         # be sure to have at least admin
         with wapt_db.atomic():
