@@ -4349,7 +4349,205 @@ return to the consolidated WAPT 1.8.3 release-validation sequence in section
 Do not begin Debian 11 before the consolidated 1.8.3 release criteria are
 closed.
 
-## 46. Resume protocol after Windows build-environment checkpoint
+## 46. Complete automated Windows product/setup build — validated artifact (2026-09-22)
+
+Development continued from the reproducible autonomous Windows runtime
+milestone documented in section 45.
+
+The complete Community product/setup automation is now implemented in:
+
+``` text
+tools/build-windows-product.ps1
+```
+
+The validation source state is:
+
+``` text
+branch: release/1.8.3
+commit: 3fb53e53485552e8f2e20a0cca48e0d45d5da5dc
+natural Git count: 7442
+target version: 1.8.3.7442
+```
+
+The script creates and uses disposable isolated build state rather than building
+the Lazarus artifacts in the VM106 main checkout:
+
+``` text
+worktree:   C:\wapt-build-worktree-auto
+Lazarus PCP: C:\wapt-build-lazarus-pcp-auto
+product:    C:\wapt-product-1.8.3
+runtime:    C:\wapt-runtime-1.8.3-script-test
+```
+
+### 46.1 Community source and Lazarus build
+
+The automated pipeline successfully reached all of the following stages:
+
+``` text
+controlled runtime validation:              PASS
+isolated Git worktree creation:             PASS
+Community submodules initialization:        16/16 PASS
+Community submodule commit verification:    16/16 PASS
+isolated Lazarus PCP creation:               PASS
+Lazarus package registration:               17/17 PASS
+Lazarus Community builds:                    9/9 PASS
+Lazarus artifact validation:                 9/9 PASS
+complete product-tree assembly:              PASS
+controlled Inno Setup reconstruction:        PASS
+version-full generation:                     PASS
+revision.txt generation:                     PASS
+unsigned Community setup compilation:        PASS
+```
+
+A Lazarus output-path assumption was corrected during this validation.
+`lazbuild.py` places the nine resulting binaries at the root of the isolated
+worktree:
+
+``` text
+wapt-get.exe
+waptguihelper.pyd
+waptdeploy.exe
+wapttray.exe
+waptconsole.exe
+waptexit.exe
+waptself.exe
+waptmessage.exe
+waptsetuputil.dll
+```
+
+`build-windows-product.ps1` now validates and copies them from that actual
+location.
+
+Lazarus 1.8.2 package registration was also experimentally confirmed to require
+`--add-package-link` and the `.lpk` path as two separate command-line arguments.
+The automated isolated PCP successfully registered all 17 required Community
+packages using that syntax.
+
+### 46.2 Automated unsigned setup result
+
+The controlled Inno Setup stage completed successfully and produced:
+
+``` text
+C:\wapt-product-1.8.3\waptsetup\waptsetup.exe
+```
+
+Validated artifact:
+
+``` text
+FileVersion:    1.8.3.7442
+ProductVersion: 1.8.3.7442
+ProductName:    WAPTSetup
+size:           26676763 bytes
+SHA256:         8FB9FDEC1283ABEAE0F3F936C372F7AD86FF2B0B13BF1D4A10010FD091B590A2
+```
+
+The first automated run stopped only in the final metadata validator because
+Windows VersionInfo exposes these fixed-width strings with trailing spaces.
+
+Manual validation using `.Trim()` returned:
+
+``` text
+FileVersion PASS:    True
+ProductVersion PASS: True
+ProductName PASS:    True
+```
+
+The generated setup itself is therefore validated.
+
+The final validator in `tools/build-windows-product.ps1` has now been corrected
+to apply `.Trim()` to all three comparisons:
+
+``` text
+FileVersion
+ProductVersion
+ProductName
+```
+
+PowerShell parser validation after these corrections:
+
+``` text
+Parse errors: 0
+```
+
+No complete rebuild was performed after this final validator-only correction.
+Therefore the current milestone is deliberately described as:
+
+``` text
+complete automated product/setup construction: PASS
+resulting unsigned setup artifact:             PASS
+corrected final validator syntax:              PASS
+fresh zero-to-exit-0 run after correction:     NOT YET PERFORMED
+clean Windows VM proof:                        NOT YET PERFORMED
+```
+
+Do not repeat the expensive VM106 build solely to prove the `.Trim()` change.
+The decisive next execution should preferably be the clean-machine proof.
+
+### 46.3 Signing remains a separate stage
+
+The current automated setup is intentionally unsigned.
+
+Do not couple reproducible unsigned construction to the unresolved production
+Authenticode strategy.
+
+The intended later release sequence remains:
+
+``` text
+build and validate Lazarus artifacts
+assemble controlled product
+sign distributable binaries when explicitly requested
+build Inno setup
+sign final setup
+verify Authenticode
+generate final hashes/release manifest
+```
+
+The temporary laboratory self-signed certificate remains a validation tool,
+not the final production distribution trust decision.
+
+### 46.4 Exact next Windows action
+
+Do not resume Windows build archaeology and do not rebuild the already
+validated artifact merely to retest the final `.Trim()` comparisons.
+
+The next decisive Windows milestone is:
+
+``` text
+PROVE THE COMPLETE AUTOMATED BUILD ON A GENUINELY CLEAN WINDOWS VM
+```
+
+Sequence:
+
+``` text
+1. review and commit only the intended Windows product-build automation and
+   checkpoint/documentation changes; never use `git add .`;
+
+2. prepare a genuinely clean Windows build VM;
+
+3. provide only the controlled build-kit, controlled Git clone and explicitly
+   documented prerequisites;
+
+4. run the complete automated Windows build from fresh disposable paths;
+
+5. require tools/build-windows-product.ps1 to complete from start to final
+   validator with no manual intervention and exit successfully;
+
+6. verify the resulting 1.8.3 setup metadata, hashes and unsigned state;
+
+7. use the clean-machine result to determine whether VCForPython27 is truly no
+   longer an external build dependency;
+
+8. after the unsigned clean-machine build is proven, finalize and validate the
+   production Authenticode signing strategy;
+
+9. return to the consolidated WAPT 1.8.3 release-validation sequence documented
+   in section 43.
+```
+
+Do not begin Debian 11 before the consolidated WAPT 1.8.3 release criteria are
+closed.
+
+## 47. Resume protocol after automated Windows product-build milestone
 
 Attach this checkpoint and send:
 
@@ -4357,9 +4555,12 @@ Attach this checkpoint and send:
 Gipity, resume the WAPT project from the attached checkpoint.
 Treat WAPT_CHECKPOINT.md as the authoritative technical state.
 Do not repeat already validated investigations unless a contradiction appears.
-The autonomous Windows runtime is reproducible through
-tools/build-windows-runtime.ps1, commit 25ded718b, natural count 7441.
-Resume at section 45.15 "Exact next Windows build action".
+The complete unsigned Windows 1.8.3.7442 product/setup has now been built
+automatically and its resulting setup artifact validated.
+The final VersionInfo validator was corrected to use Trim() and parses cleanly,
+but no complete rebuild was performed after that validator-only correction.
+Resume at section 47.4 "Exact next Windows action": prove the complete
+automated build on a genuinely clean Windows VM.
 Short answers, one step at a time.
 ```
 
@@ -4369,4 +4570,4 @@ VM106 remains the authoritative checkpoint working tree:
 C:\git\waptdev\WAPT_CHECKPOINT.md
 ```
 
-Do not accidentally commit Windows build residue and never use `git add .`.
+Do not accidentally commit historical/build residue and never use `git add .`.

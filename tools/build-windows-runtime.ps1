@@ -130,8 +130,17 @@ $bootstrapRoot = Split-Path (Split-Path $BootstrapPython -Parent) -Parent
 $bootstrapRoot = Split-Path $BootstrapPython -Parent
 $bootstrapLib  = Join-Path $bootstrapRoot "Lib"
 $bootstrapDlls = Join-Path $bootstrapRoot "DLLs"
+$bootstrapLibs = Join-Path $bootstrapRoot "libs"
+
 Assert-Dir $bootstrapLib
 Assert-Dir $bootstrapDlls
+Assert-Dir $bootstrapLibs
+
+$bootstrapLibFiles = Get-ChildItem -LiteralPath $bootstrapLibs -File
+
+if ($bootstrapLibFiles.Count -ne 19) {
+    throw "Unexpected Python 2.7 libs content: expected 19 files, found $($bootstrapLibFiles.Count) in $bootstrapLibs"
+}
 
 # Prevent destructive/ambiguous output choices.
 $repoFull = [IO.Path]::GetFullPath($RepoRoot).TrimEnd('\')
@@ -275,6 +284,33 @@ if ($LASTEXITCODE -gt 7) { throw "robocopy Lib failed with code $LASTEXITCODE" }
 Write-Step "Embedding CPython 2.7 native DLL directory"
 & robocopy $bootstrapDlls (Join-Path $Output "DLLs") /E /R:0 /W:0 | Out-Host
 if ($LASTEXITCODE -gt 7) { throw "robocopy DLLs failed with code $LASTEXITCODE" }
+
+Write-Step "Embedding CPython 2.7 import libraries"
+
+$runtimeLibs = Join-Path $Output "libs"
+New-Item -ItemType Directory -Path $runtimeLibs -Force | Out-Null
+
+& robocopy $bootstrapLibs $runtimeLibs /E /R:0 /W:0 | Out-Host
+if ($LASTEXITCODE -gt 7) { throw "robocopy libs failed with code $LASTEXITCODE" }
+
+$runtimeLibFiles = Get-ChildItem -LiteralPath $runtimeLibs -File
+if ($runtimeLibFiles.Count -ne 19) {
+    throw "Unexpected runtime libs content: expected 19 files, found $($runtimeLibFiles.Count) in $runtimeLibs"
+}
+
+foreach ($sourceFile in $bootstrapLibFiles) {
+    $destinationFile = Join-Path $runtimeLibs $sourceFile.Name
+    Assert-File $destinationFile
+
+    $sourceHash = (Get-FileHash -LiteralPath $sourceFile.FullName -Algorithm SHA256).Hash
+    $destinationHash = (Get-FileHash -LiteralPath $destinationFile -Algorithm SHA256).Hash
+
+    if ($sourceHash -ne $destinationHash) {
+        throw "Python import library hash mismatch: $($sourceFile.Name)"
+    }
+}
+
+Write-Host "Python import libraries: 19/19 PASS"
 
 $OrigPrefix = Join-Path $Output "Lib\orig-prefix.txt"
 if (Test-Path -LiteralPath $OrigPrefix) {
