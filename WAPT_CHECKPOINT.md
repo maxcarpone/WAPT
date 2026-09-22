@@ -3932,3 +3932,441 @@ C:\git\waptdev\WAPT_CHECKPOINT.md
 
 Wapster's untracked `WAPT_CHECKPOINT.md` remains an obsolete duplicate and
 must not be committed.
+
+## 45. Windows build environment reproducibility - validated milestone (2026-09-22)
+
+A bounded Windows reconstruction milestone was completed before returning to
+the remaining Debian 10 release/DR validation.
+
+Objective:
+
+``` text
+clean Windows machine
+  -> controlled build-kit
+  -> controlled WAPT Git clone + Community submodules
+  -> autonomous Python 2 runtime
+  -> isolated Lazarus/FPC build
+  -> controlled Inno Setup
+  -> complete WAPT setup build
+  -> signing and verification
+```
+
+Historical `init_workdir.bat` is now an archaeological specification only.
+Do not run it as-is: it performs destructive cleanup, live dependency updates
+and downloads, assumes `C:\Python27`, mutates the checkout, and follows old
+bootstrap paths.
+
+### 45.1 Controlled build-kit
+
+Controlled root:
+
+``` text
+C:\wapt-build-kit
+```
+
+Main controlled inputs:
+
+``` text
+Git 2.55.0.windows.5
+SHA256 D065A4E23C3D9A6B5073D609B5BE0830227EC3CA053C083BA385061DDFAF94C6
+
+CPython 2.7.18 x86 MSI
+SHA256 D901802E90026E9BAD76B8A81F8DD7E43C7D7E8269D9281C9E9DF7A9C40480A9
+
+Lazarus 1.8.2 + FPC 3.0.4 win32 baseline
+SHA256 B91517C673453F5AA355FFB3952E040433A8CDBBC5239BE72C869B60131B4166
+
+Inno Setup 5.6.0 Unicode baseline
+SHA256 84A97B5820F83E7EB7258B69CC857C4F446DFB5C7C337C35E05A0CC304729346
+```
+
+Lazarus/FPC 1.8.2/3.0.4 and Inno Setup 5.6.0 are reproducible baselines,
+not permanent modernization targets. Modernization will be tested one
+component at a time after the clean baseline is proven.
+
+### 45.2 Community Git dependency chain - PASS
+
+Parent milestone:
+
+``` text
+branch: release/1.8.3
+commit: 9cc639f881a88b112c61d12a8a0d1d3085940b9f
+natural Git count: 7440
+message: Make WAPT Community submodules reproducible
+```
+
+All 16 Community submodules were initialized from a clean controlled clone.
+Do not use a blind recursive update that attempts obsolete Enterprise-only
+dependencies.
+
+### 45.3 Isolated Lazarus build - 9/9 PASS
+
+Fresh isolated Lazarus PCP:
+
+``` text
+C:\tmp\wapt-lazarus-clean
+```
+
+All 18 required Lazarus user packages were registered solely from the clean
+controlled clone. All nine Community projects then built successfully:
+
+``` text
+wapt-get.exe
+waptguihelper.pyd
+waptdeploy.exe
+wapttray.exe
+waptconsole.exe
+waptexit.exe
+waptself.exe
+waptmessage.exe
+waptsetuputil.dll
+```
+
+Validated metadata:
+
+``` text
+FileVersion:    1.8.3.7440
+ProductVersion: 1.8.3
+ProductName:    WAPT Community Edition
+```
+
+This proves that the Lazarus dependency/build chain is reproducible without
+the historical VM106 Lazarus user profile.
+
+### 45.4 Offline Python dependency set
+
+Controlled source wheelhouse:
+
+``` text
+C:\wapt-build-kit\python\wheelhouse
+files: 85
+manifest SHA256:
+FE4F2DAD7754875758F98E6F7E96FF9AD6771432756E55A0291890983BFAB5A0
+```
+
+Controlled prepared wheels:
+
+``` text
+C:\wapt-build-kit\python\built-wheels
+files: 85
+manifest SHA256:
+27D44C87C80712C64B565747FD816E119006DD68469BAECCC042F0F70A9A5CDB
+```
+
+The prepared wheel set was built using `--no-cache-dir --no-index` from the
+controlled wheelhouse.
+
+Runtime package BOM:
+
+``` text
+C:\wapt-build-kit\python\wapt-runtime-1.8.3-freeze.txt
+SHA256 6E83828FA2F8A17FF9D83505909D5CF580974E2AE01EF899912D3711789D7E9A
+```
+
+The freeze is a package BOM, not the complete assembly recipe.
+
+### 45.5 pywin32 228 target
+
+The selected WAPT 1.8.3 Windows Python target is now:
+
+``` text
+pywin32 228
+```
+
+pywin32 227 is retained only as a historical/fallback reference.
+
+Controlled pywin32 228 DLLs:
+
+``` text
+pythoncom27.dll
+SHA256 074F23F9710BBCF1447763829C0E3D16AFA5502EFC6F784077CF334F28CEFFB7
+
+pythoncomloader27.dll
+SHA256 CC5BA5439CFA435FC9BD442F6509EBDF83646DF0756093DFF6777775FD2246E6
+
+pywintypes27.dll
+SHA256 C4DB872FF7D301186516882EA06422AEE29E1C11B44A4D382ADDD5B801207818
+```
+
+Validated imports include pywin32, WMI, winshell, winsys, winkerberos, pyad,
+kerberos-sspi and WAPT runtime modules.
+
+### 45.6 Additional controlled Python inputs
+
+``` text
+ujson-1.35.pyd
+SHA256 F481A7AFB2DF7D834C2537D3DFA5CE1B22C0C40A83F4BD73602270A728951739
+
+active_directory-0.6.7.py
+SHA256 EDFE01A38139D79A2EAC7B6F409B0495A447536CBB004318811D5CAF5842A556
+
+python27.dll
+SHA256 8C81C84548CE191B11390EBAA71397D23662593B1C113AAA0392E40FF0F9307A
+```
+
+`active_directory.py` is an implicit WAPT dependency imported by
+`setuphelpers_windows.py` but absent from the historical requirements files.
+
+The WAPT SocketIO and cryptography compatibility patches remain required and
+are sourced from the controlled WAPT repository.
+
+### 45.7 Autonomous Windows Python/WAPT runtime - PASS
+
+A fresh runtime was reconstructed manually and then independently recreated by
+the scripted procedure.
+
+Validated properties:
+
+``` text
+Python 2.7.18 x86
+pywin32 228
+full local CPython stdlib and DLL directory
+local python27.dll
+no C:\Python27 entry in sys.path
+no PYTHONPATH dependency
+WAPT SocketIO patch applied
+WAPT cryptography patch applied
+ujson 1.35 controlled binary
+active_directory 0.6.7 controlled source
+waptutils 1.8.3
+waptcrypto import PASS
+waptpackage import PASS
+setuphelpers import PASS
+common import PASS
+wapt-get.py --help exit code 0
+```
+
+Tests were run outside the Git checkout so checkout imports could not hide
+missing runtime files. Loaded-module inspection confirmed `python27.dll` was
+loaded from the assembled runtime rather than `C:\Windows\SysWOW64`.
+
+### 45.8 External WAPT OpenSSL baseline - controlled
+
+Controlled archive:
+
+``` text
+C:\wapt-build-kit\runtime\openssl\openssl-1.0.2u-i386-win32.zip
+SHA256 644FEDF6FC567716EF25F4FC805E2AAAC5BB7D32D01349EAEB62802CD20AE81A
+```
+
+Validated extracted files:
+
+``` text
+openssl.exe
+SHA256 6063E160E812F3D57B67B77581E30F110FDFC708F763BB2FCC82FA9CAAC816A3
+
+libeay32.dll
+SHA256 5264A4A478383F501961F2BD9BEB1F77A43A487B76090561BBA2CBFE951E5305
+
+ssleay32.dll
+SHA256 0A4031AB00664CC5E202C8731798800F0475EF76800122CEBD71D249655D725F
+```
+
+`openssl.exe version` runs successfully from the assembled runtime and reports
+OpenSSL 1.0.2u. The `/usr/local/ssl/openssl.cnf` warning is non-blocking for
+this baseline. OpenSSL 1.0.2u remains a compatibility baseline, not the final
+modernization target.
+
+### 45.9 VC90 CRT, dmidecode and NSSM - controlled
+
+VC90 CRT 9.0.30729.6161:
+
+``` text
+msvcr90.dll
+SHA256 8E7FE1A1F3550C479FFD86A77BC9D10686D47F8727025BB891D8F4F0259354C8
+
+msvcp90.dll
+SHA256 06918CF99AD26CD6CF106881C0D5BDB212DC0BAC4549805C9F5906E3D03D152C
+
+msvcm90.dll
+SHA256 7A74DA389FBD10A710C294C2E914DC6F18E05F028F07958A2FA53AC44F0E4B90
+
+Microsoft.VC90.CRT.manifest
+SHA256 0C838C4262F99F27495A7C2A1BF4EC8F482D1C9BC2493C3C19B9360F1A06B8EB
+```
+
+Controlled dmidecode:
+
+``` text
+C:\wapt-build-kit\runtime\tools\dmidecode.exe
+SHA256 7E14292571834665F0788C1BDE495421F704FAB74679127CBE35AF65714587F2
+```
+
+Controlled NSSM:
+
+``` text
+win32 nssm.exe
+SHA256 BCE355F89B95D9F7C7441563D03A6CE6CD429DB865920F66561C0D90D1E0E285
+
+win64 nssm.exe
+SHA256 2900F26D2ED74F4D5DB77CBCCBD4F2185FCCE2625A1BE724120984AC2418989B
+```
+
+The historical `vc_redist` reference is not currently demonstrated to be a
+required build dependency: the active setup embeds the VC90 CRT files
+directly and the historical vcredist macro is disabled.
+
+### 45.10 Inno Setup reconstruction - 11/11 identical
+
+The controlled Inno Setup 5.6.0 Unicode installer was installed into an
+isolated directory. The 11 files historically used under
+`waptsetup\innosetup` were compared with the clean installation:
+
+``` text
+isbunzip.dll
+isbzip.dll
+ISCC.exe
+ISCmplr.dll
+islzma.dll
+islzma32.exe
+islzma64.exe
+ISPP.dll
+isscint.dll
+isunzlib.dll
+iszlib.dll
+```
+
+Result:
+
+``` text
+11/11 SHA256 comparisons: IDENTICAL
+```
+
+Therefore the historical `waptsetup\innosetup` tree can be regenerated from
+the controlled installer and is no longer an opaque VM106 dependency.
+
+### 45.11 Scripted replacement for runtime assembly - PASS
+
+The following files were added:
+
+``` text
+WINDOWS_BUILD_ENV.md
+WINDOWS_BUILD_RELEASE.md
+tools/build-windows-runtime.ps1
+```
+
+`tools/build-windows-runtime.ps1` is deliberately bounded to runtime assembly.
+It does not perform destructive Git cleanup, Internet dependency resolution,
+Lazarus compilation, final Inno setup compilation, or signing.
+
+It verifies controlled hashes, creates the Python 2.7 runtime, installs
+dependencies offline, selects pywin32 228, applies WAPT patches, embeds the
+CPython stdlib/DLLs, removes the virtualenv base-prefix dependency, installs
+controlled WAPT runtime files and external OpenSSL, and performs autonomy
+tests.
+
+A fresh scripted reconstruction completed successfully at:
+
+``` text
+C:\wapt-runtime-1.8.3-script-test
+```
+
+This is a real end-to-end assembly validation, not only a documentation or
+syntax check.
+
+### 45.12 Git milestone
+
+The documentation and validated runtime reconstruction script were committed
+and pushed as:
+
+``` text
+25ded718bd4aebf6821a375c1e59fb9d7ba0b2ed
+Add reproducible Windows build environment
+natural Git count: 7441
+```
+
+Remote verification:
+
+``` text
+origin/release/1.8.3
+25ded718bd4aebf6821a375c1e59fb9d7ba0b2ed
+```
+
+The preceding Community-submodule milestone is:
+
+``` text
+9cc639f881a88b112c61d12a8a0d1d3085940b9f
+Make WAPT Community submodules reproducible
+natural Git count: 7440
+```
+
+### 45.13 Intentional working-tree build residue
+
+The VM106 main checkout still contains uncommitted Windows build-generated
+changes including `revision.txt`, Lazarus `.lpi`/`.ico` files,
+`waptconsole.sha256`, and untracked `waptsetup\waptsetup-tis.exe`.
+
+These are intentional build residues and were not included in commit
+`25ded718b`.
+
+Continue to obey:
+
+``` text
+never git add .
+```
+
+### 45.14 VCForPython27 status
+
+VM106 has Microsoft Visual C++ Compiler Package for Python 2.7 9.0.1.30729
+installed, but it has not been promoted into the controlled build-kit.
+
+The prepared `built-wheels` are intended to make native compilation
+unnecessary on a future clean Windows build VM. This must be proven on that
+clean VM before declaring VCForPython27 unnecessary.
+
+### 45.15 Exact next Windows build action
+
+Do not resume random VM106 binary archaeology.
+
+Next milestone:
+
+``` text
+AUTOMATE COMPLETE PRODUCT/SETUP ASSEMBLY FROM CONTROLLED INPUTS
+```
+
+Sequence:
+
+``` text
+1. extend the controlled procedure from autonomous runtime to complete WAPT
+   product-tree assembly;
+2. populate controlled VC90 CRT, dmidecode and NSSM from the build-kit;
+3. regenerate the 11-file Inno Setup tree from the controlled installer;
+4. integrate the already validated isolated 9/9 Lazarus build;
+5. build the complete WAPT setup from the controlled tree;
+6. validate setup metadata and contents;
+7. keep signing as a separate explicit stage;
+8. perform the decisive proof on a genuinely clean Windows VM using only the
+   controlled build-kit, controlled Git clone and documented prerequisites.
+```
+
+Only the clean-VM proof can finally establish that VM106 and its installed
+VCForPython27 are no longer build dependencies.
+
+After this Windows reconstruction side-task reaches the clean-machine proof,
+return to the consolidated WAPT 1.8.3 release-validation sequence in section
+43.
+
+Do not begin Debian 11 before the consolidated 1.8.3 release criteria are
+closed.
+
+## 46. Resume protocol after Windows build-environment checkpoint
+
+Attach this checkpoint and send:
+
+``` text
+Gipity, resume the WAPT project from the attached checkpoint.
+Treat WAPT_CHECKPOINT.md as the authoritative technical state.
+Do not repeat already validated investigations unless a contradiction appears.
+The autonomous Windows runtime is reproducible through
+tools/build-windows-runtime.ps1, commit 25ded718b, natural count 7441.
+Resume at section 45.15 "Exact next Windows build action".
+Short answers, one step at a time.
+```
+
+VM106 remains the authoritative checkpoint working tree:
+
+``` text
+C:\git\waptdev\WAPT_CHECKPOINT.md
+```
+
+Do not accidentally commit Windows build residue and never use `git add .`.
