@@ -1,6 +1,6 @@
 ; Template for waptagent build using iscc
 #define edition "waptagent"
-#define default_repo_url "https://store.wapt.fr/wapt"
+#define default_repo_url ""
 #define default_wapt_server ""
 #define repo_url ""
 #define wapt_server ""
