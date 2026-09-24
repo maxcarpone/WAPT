@@ -4842,26 +4842,293 @@ tools\02-build-windows-runtime.ps1
 tools\03-build-windows-product.ps1
 ```
 
-## 47. Resume protocol after automated Windows product-build milestone
+## 47. Consolidated 1.8.3 historical database migration milestone — PASS (2026-09-24)
+
+### 47.1 Final Windows build workflow state
+
+The Windows reconstruction workflow is now validated in the following explicit order:
+
+```text
+tools\01-prepare-windows-build-environment.ps1
+tools\02-build-windows-runtime.ps1
+tools\03-build-windows-product.ps1
+```
+
+The complete chain was proven on clean VM107.
+
+The final product build was performed from Git natural count `7444`.
+
+Validated unsigned Windows setup:
+
+```text
+C:\wapt-product-1.8.3\waptsetup\waptsetup.exe
+
+FileVersion:    1.8.3.7444
+ProductVersion: 1.8.3.7444
+ProductName:    WAPTSetup
+Size:           26655898 bytes
+SHA256:         C904C7059F1FB0F308EC78DC78470C2B3B96A9F3F3D275B28468111759C54D0E
+Authenticode:   NotSigned
+```
+
+Matching `waptdeploy.exe`:
+
+```text
+C:\wapt-product-1.8.3\waptdeploy.exe
+
+Size:   496659 bytes
+SHA256: 7F3785B86D763B62B3B0A0050910F5F76C5D1911D1C18A4F8810270DCD70F9A4
+```
+
+Signing remains a separate explicit release stage.
+
+The source/documentation branch was subsequently finalized at:
+
+```text
+branch: release/1.8.3
+HEAD:   144d3af2e56d551dae60063c9ced33a44590713c
+count:  7445
+```
+
+Git count `7445` contains the final script renaming/documentation changes.
+No functional Windows rebuild was performed after the validated `7444`
+product build, so no `1.8.3.7445` Windows binary is claimed.
+
+### 47.2 Reconstructed tis-waptsetup Debian package — PASS
+
+The validated Windows artifacts were transferred to Wapster and used with the
+historical Debian packaging mechanism.
+
+The expected Windows payload is:
+
+```text
+waptsetup-tis.exe
+waptdeploy.exe
+```
+
+The resulting package is:
+
+```text
+tis-waptsetup-windows-1.8.3.7445-144d3af2.deb
+
+Package:      tis-waptsetup
+Version:      1.8.3.7445
+Architecture: all
+Depends:      nginx
+SHA256:       c8698aae4c252c9d54ca702ec31244aadbcb7c9fdd059855462339e6fece6cb8
+```
+
+Package contents include:
+
+```text
+./var/www/wapt/waptdeploy.exe       496659 bytes
+./var/www/wapt/waptsetup-tis.exe 26655898 bytes
+```
+
+The packaged executables were extracted and their SHA256 values verified
+against the validated VM107 artifacts:
+
+```text
+waptsetup-tis.exe
+c904c7059f1fb0f308ec78dc78470c2b3b96a9f3f3d275b28468111759c54d0e
+
+waptdeploy.exe
+7f3785b86d763b62b3b0a0050910f5f76c5d1911d1c18a4f8810270dcd70f9a4
+```
+
+The Debian package was transferred to `wapt-deb10`, its SHA256 was verified
+again, and `tis-waptsetup 1.8.3.7445` was installed successfully.
+
+The installed Windows payload hashes were also verified.
+
+Result:
+
+```text
+reconstructed tis-waptsetup package: PASS
+Windows payload integrity:           PASS
+installation on Debian 10:           PASS
+```
+
+### 47.3 Authentic historical DB migration 1.8.2.1 -> 1.8.3.0 — PASS
+
+Migration target:
+
+```text
+Debian:         10.13
+host:           wapt-deb10
+tis-waptserver: 1.8.3.7436-2377932b-debian-10-amd64
+tis-waptsetup:  1.8.3.7445
+```
+
+The restored authentic historical database initially contained:
+
+```text
+db_version = "1.8.2.1"
+```
+
+Starting `waptserver` performed the database migration automatically.
+
+Immediately after startup:
+
+```text
+db_version = "1.8.3.0"
+```
+
+No manual database marker modification was performed.
+
+`waptserver` was then restarted to test migration idempotence.
+
+After restart:
+
+```text
+waptserver: active
+db_version = "1.8.3.0"
+```
+
+Therefore the authentic historical database migration and its restart
+idempotence are validated.
+
+Historical data remained present after migration. Final exact counts checked:
+
+```text
+hosts=675
+packages=1056
+hostpackagesstatus=25101
+```
+
+Final service validation:
+
+```text
+postgresql: active
+nginx:      active
+waptserver: active
+wapttasks:  active
+```
+
+Local HTTPS validation:
+
+```text
+https://localhost/
+HTTP 200
+```
+
+The final database marker remained:
+
+```text
+db_version="1.8.3.0"
+```
+
+No error-level journal entries were reported for `waptserver` or `wapttasks`
+during the migration validation window.
+
+Final result:
+
+```text
+historical DB 1.8.2.1 -> 1.8.3.0: PASS
+migration restart/idempotence:        PASS
+historical data preservation:         PASS
+WAPT server service:                  PASS
+WAPT task service:                    PASS
+nginx/PostgreSQL services:            PASS
+local HTTPS:                          PASS
+```
+
+This closes the previously pending requirement:
+
+```text
+Implement explicit idempotent DB marker migration from 1.8.2.1
+to at least 1.8.3.0 for the consolidated release.
+```
+
+### 47.4 Important service-name clarification
+
+The historical WAPT task service is named:
+
+```text
+wapttasks.service
+```
+
+and not:
+
+```text
+wapptasks.service
+```
+
+The validated service file is:
+
+```text
+/lib/systemd/system/wapttasks.service
+```
+
+and the service is enabled and operational.
+
+The installed `tis-waptserver` post-install procedure also uses:
+
+```text
+systemctl restart waptserver
+systemctl restart wapttasks
+```
+
+Future validation procedures must use the correct `wapttasks` service name.
+
+### 47.5 Exact next action
+
+The authentic historical database migration blocker is now closed.
+
+Do not repeat the `1.8.2.1 -> 1.8.3.0` database migration investigation unless
+a later test reveals a contradiction.
+
+Resume the consolidated WAPT 1.8.3 validation sequence in this order:
+
+1. Validate the common 1.8.3 server/setup/client artifacts together.
+
+2. Validate final Windows setup/agent publication and package-signing
+   continuity against the consolidated 1.8.3 server.
+
+3. Validate authentic WAPT 1.8.2.7393 -> 1.8.3 migration, including the
+   historical client upgrade and final WAPTService state.
+
+4. Validate repository/package revision continuity and the current
+   `<prefix>-waptupgrade` generation/install path.
+
+5. Perform the final autonomous-distribution validation: installation must not
+   depend on an obsolete external WAPT repository or website.
+
+6. Re-evaluate final Windows Authenticode signing and the future PADIT product
+   identity/branding before the final public release.
+
+The Windows `1.8.3.7444` clean-machine build proof remains authoritative for
+the current Windows binary artifacts. Git count `7445` is the subsequent
+documentation/script-naming state and must not be confused with a rebuilt
+Windows product.
+
+## 48. Resume protocol for the next ChatGPT thread
 
 Attach this checkpoint and send:
 
-``` text
+```text
 Gipity, resume the WAPT project from the attached checkpoint.
 Treat WAPT_CHECKPOINT.md as the authoritative technical state.
 Do not repeat already validated investigations unless a contradiction appears.
-The complete unsigned Windows 1.8.3.7442 product/setup has now been built
-automatically and its resulting setup artifact validated.
-The final VersionInfo validator was corrected to use Trim() and parses cleanly,
-but no complete rebuild was performed after that validator-only correction.
-Resume at section 47.4 "Exact next Windows action": prove the complete
-automated build on a genuinely clean Windows VM.
+
+The Windows autonomous build workflow 01 -> 02 -> 03 is validated on clean
+VM107. The authoritative Windows binary proof is 1.8.3.7444; Git count 7445
+contains only subsequent documentation/script-naming changes.
+
+The reconstructed tis-waptsetup 1.8.3.7445 package is validated and contains
+the exact validated Windows setup/deploy payload.
+
+The authentic historical database migration from db_version 1.8.2.1 to
+1.8.3.0 is PASS, including restart/idempotence, preservation of historical
+data, waptserver/wapttasks operation and local HTTPS.
+
+Resume at section 47.5 "Exact next action".
 Short answers, one step at a time.
 ```
 
 VM106 remains the authoritative checkpoint working tree:
 
-``` text
+```text
 C:\git\waptdev\WAPT_CHECKPOINT.md
 ```
 
