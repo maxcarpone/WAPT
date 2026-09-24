@@ -4694,7 +4694,7 @@ Before freezing the final Windows build procedure:
 2. automate preparation of a clean Windows build environment, preferably with:
 
    ```text
-   tools\prepare-windows-build-environment.ps1
+   tools\01-prepare-windows-build-environment.ps1
    ```
 
    The procedure should validate controlled installer hashes, install the
@@ -4712,7 +4712,7 @@ Before freezing the final Windows build procedure:
    ```
 
 5. Inno Setup does not need to be installed globally for the product build.
-   `build-windows-product.ps1` reconstructs and uses its controlled Inno tree
+   `03-build-windows-product.ps1` reconstructs and uses its controlled Inno tree
    from the build-kit installer. The global Inno installation performed during
    the VM107 investigation was therefore unnecessary and must not become a
    documented prerequisite;
@@ -4729,7 +4729,7 @@ validation sequence.
 A dedicated Windows build-environment bootstrap script was added:
 
 ```text
-tools\prepare-windows-build-environment.ps1
+tools\01-prepare-windows-build-environment.ps1
 ```
 
 The script validates the controlled bootstrap inputs by SHA256 and installs or
@@ -4777,7 +4777,7 @@ HEAD:  0e4ae52804099bbd956573e380ea2e34227e7e30
 count: 7443
 ```
 
-The temporary default runtime path in `tools\build-windows-product.ps1` was
+The temporary default runtime path in `tools\03-build-windows-product.ps1` was
 also changed from:
 
 ```text
@@ -4795,6 +4795,52 @@ unchanged.
 
 At this point the clean Windows environment reconstruction procedure is
 automated and validated.
+
+#### Final numbered Windows build-chain proof — PASS (2026-09-24)
+
+After introducing the explicit numbered build sequence, the complete Windows
+chain was validated on clean VM107:
+
+```text
+01 - prepare Windows build environment: PASS
+02 - build autonomous Python runtime:   PASS
+03 - build complete Windows product:    PASS
+```
+
+The autonomous runtime was successfully assembled at:
+
+```text
+C:\wapt-runtime-1.8.3
+```
+
+The final product build from Git natural count `7444` completed successfully.
+
+Final unsigned setup:
+
+```text
+FileVersion:    1.8.3.7444
+ProductVersion: 1.8.3.7444
+ProductName:    WAPTSetup
+Size:           26655898 bytes
+SHA256:         C904C7059F1FB0F308EC78DC78470C2B3B96A9F3F3D275B28468111759C54D0E
+```
+
+This clean-machine proof confirms:
+
+- VCForPython27 is not required;
+- a global Inno Setup installation is not required;
+- the autonomous runtime must be built before product assembly;
+- signing remains a separate explicit stage;
+- the clean-machine proof artifact is intentionally unsigned.
+
+The operational scripts are now numbered to make their required execution
+order explicit:
+
+```text
+tools\01-prepare-windows-build-environment.ps1
+tools\02-build-windows-runtime.ps1
+tools\03-build-windows-product.ps1
+```
 
 ## 47. Resume protocol after automated Windows product-build milestone
 

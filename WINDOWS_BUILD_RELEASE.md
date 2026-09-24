@@ -25,6 +25,27 @@ Required:
 
 Do not use live Internet package resolution during runtime assembly.
 
+## Windows build script execution order
+
+On a clean Windows build machine, execute the controlled build scripts in this
+order:
+
+```text
+01-prepare-windows-build-environment.ps1
+02-build-windows-runtime.ps1
+03-build-windows-product.ps1
+```
+
+The stages are intentionally independent:
+
+1. `01` installs and validates the controlled Windows build prerequisites;
+2. `02` assembles and validates the autonomous Python 2.7 runtime;
+3. `03` consumes the already validated runtime and builds the complete WAPT
+   Community product and unsigned setup.
+
+Do not skip stage `02`: `03-build-windows-product.ps1` requires the autonomous
+runtime to exist before product assembly begins.
+
 ## Phase 1 --- Verify source state
 
 From the WAPT repository:
@@ -56,7 +77,7 @@ with natural count `7440`.
 Use:
 
 ``` powershell
-powershell -ExecutionPolicy Bypass -File .\tools\build-windows-runtime.ps1 `
+powershell -ExecutionPolicy Bypass -File .\tools\02-build-windows-runtime.ps1 `
     -BuildKit C:\wapt-build-kit `
     -BootstrapPython C:\Python27\python.exe `
     -Output C:\wapt-runtime-1.8.3
@@ -200,24 +221,42 @@ avoid signing requirements.
 
 ## Phase 11 --- Clean-machine proof
 
-The decisive acceptance test is a fresh Windows machine with no
-inherited VM106 WAPT environment.
+The complete controlled Windows build chain was validated on a clean VM107
+rollback on 2026-09-24.
 
-Starting only with the controlled build-kit and controlled Git clone:
+The validated execution order is:
 
-1.  install only explicitly documented build prerequisites;
-2.  assemble the autonomous Python runtime;
-3.  initialize Community submodules;
-4.  prepare isolated Lazarus PCP;
-5.  build all 9 Lazarus projects;
-6.  reconstruct Inno Setup files;
-7.  populate controlled external binaries;
-8.  build the setup;
-9.  sign using the selected test/release method;
-10. validate setup and agent behavior.
+```text
+01-prepare-windows-build-environment.ps1
+02-build-windows-runtime.ps1
+03-build-windows-product.ps1
+```
 
-A successful clean-machine run determines whether VCForPython27 is
-actually unnecessary when using the prepared wheels.
+Results:
+
+```text
+01 - controlled build prerequisites: PASS
+02 - autonomous Python runtime:       PASS
+03 - complete Windows product/setup:  PASS
+```
+
+The final unsigned setup produced from Git natural count 7444 was:
+
+```text
+FileVersion:    1.8.3.7444
+ProductVersion: 1.8.3.7444
+ProductName:    WAPTSetup
+Size:           26655898 bytes
+SHA256:         C904C7059F1FB0F308EC78DC78470C2B3B96A9F3F3D275B28468111759C54D0E
+```
+
+The clean-machine proof confirms that VCForPython27 is not required.
+
+A global Inno Setup installation is also not required: the product-build stage
+reconstructs and uses its controlled Inno tree.
+
+Signing remains a separate explicit release stage. The clean-machine proof
+artifact is intentionally unsigned.
 
 ## Phase 12 --- Modernization after baseline proof
 

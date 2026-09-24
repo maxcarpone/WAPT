@@ -322,7 +322,7 @@ Problems include:
 -   old download/bootstrap behavior through `update_binaries.py`.
 
 Its useful behavior has been treated as a specification and is being
-replaced by `tools\build-windows-runtime.ps1`.
+replaced by `tools\02-build-windows-runtime.ps1`.
 
 ## Baseline versus modernization
 
