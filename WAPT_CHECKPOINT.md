@@ -5071,42 +5071,445 @@ systemctl restart wapttasks
 
 Future validation procedures must use the correct `wapttasks` service name.
 
-### 47.5 Exact next action
+### 47.5 Consolidated Windows publication, agent generation and historical client migration — PASS
 
-The authentic historical database migration blocker is now closed.
+The consolidated WAPT 1.8.3 Windows/server chain was validated end-to-end
+against the restored Debian 10 server.
 
-Do not repeat the `1.8.2.1 -> 1.8.3.0` database migration investigation unless
-a later test reveals a contradiction.
+#### Server-published setup/deploy payload — PASS
 
-Resume the consolidated WAPT 1.8.3 validation sequence in this order:
+The installed `tis-waptsetup 1.8.3.7445` package publishes:
 
-1. Validate the common 1.8.3 server/setup/client artifacts together.
+```text
+/var/www/wapt/waptsetup-tis.exe
+/var/www/wapt/waptdeploy.exe
+```
 
-2. Validate final Windows setup/agent publication and package-signing
-   continuity against the consolidated 1.8.3 server.
+Their hashes exactly match the authoritative VM107 clean-build artifacts:
 
-3. Validate authentic WAPT 1.8.2.7393 -> 1.8.3 migration, including the
-   historical client upgrade and final WAPTService state.
+```text
+waptsetup-tis.exe
+Size:   26655898 bytes
+SHA256: C904C7059F1FB0F308EC78DC78470C2B3B96A9F3F3D275B28468111759C54D0E
 
-4. Validate repository/package revision continuity and the current
-   `<prefix>-waptupgrade` generation/install path.
+waptdeploy.exe
+Size:   496659 bytes
+SHA256: 7F3785B86D763B62B3B0A0050910F5F76C5D1911D1C18A4F8810270DCD70F9A4
+```
 
-5. Perform the final autonomous-distribution validation: installation must not
-   depend on an obsolete external WAPT repository or website.
+`dpkg -V tis-waptsetup` reported no integrity difference.
 
-6. Re-evaluate final Windows Authenticode signing and the future PADIT product
-   identity/branding before the final public release.
+Downloading the two files through the WAPT server HTTPS publication path
+produced the same hashes.
 
-The Windows `1.8.3.7444` clean-machine build proof remains authoritative for
-the current Windows binary artifacts. Git count `7445` is the subsequent
-documentation/script-naming state and must not be confused with a rebuilt
-Windows product.
+The published setup reports:
+
+```text
+FileVersion:    1.8.3.7444
+ProductVersion: 1.8.3.7444
+ProductName:    WAPTSetup
+Authenticode:   NotSigned
+```
+
+A fresh Windows installation from this published setup completed successfully.
+
+Installed client state:
+
+```text
+Wrapper Win32.exe : wapt-get 1.8.3.7444
+wapt-get.py 1.8.3
+common.py 1.8.3
+setuphelpers.py 1.8.3
+
+WAPTService: Running / Automatic
+```
+
+Result:
+
+```text
+server/setup artifact consistency: PASS
+HTTPS publication integrity:       PASS
+fresh Windows setup installation:  PASS
+```
+
+#### waptconsole manifest / Authenticode behavior — validated
+
+The current `waptconsole.exe.manifest` behavior was tested without modifying
+the historical `uiAccess="true"` setting.
+
+Observed behavior:
+
+```text
+7444 unsigned + external manifest:
+Windows refuses launch with "Une référence a été renvoyée par le serveur"
+
+7444 unsigned + external manifest temporarily disabled:
+console launches and UI cosmetics are correct
+
+7444 signed with the LAB Authenticode certificate but certificate untrusted:
+Authenticode status UnknownError
+
+7444 signed with the LAB Authenticode certificate and certificate trusted:
+Authenticode Valid
+console launches correctly with external manifest intact
+UI cosmetics correct
+console authentication successful
+```
+
+Therefore:
+
+- there is no demonstrated Lazarus/UI regression in the 7444 build;
+- `UseXPManifest` must not be added merely to address this behavior;
+- the historical external manifest must not be altered;
+- `uiAccess="true"` must not be changed at this stage;
+- Authenticode signing is functionally relevant to launching
+  `waptconsole.exe` with the current manifest;
+- the temporary LAB certificate is validation-only and is not the final
+  release-signing identity.
+
+#### Historical package-signing identity restored — PASS
+
+The historical repository/package prefix was restored in the console:
+
+```text
+0790007d
+```
+
+The corresponding historical package-signing certificate and matching
+private key were selected externally.
+
+The console successfully verified that the selected private key matched the
+historical certificate.
+
+This package-signing identity is distinct from the temporary Windows
+Authenticode LAB certificate.
+
+The private package-signing key remains external and must not be embedded in
+the WAPT installation or committed to the repository.
+
+#### Generated WAPT agent and waptupgrade publication — PASS
+
+Using the consolidated 1.8.3.7444 console and the historical signing identity,
+the WAPT agent was generated successfully.
+
+The generation automatically published:
+
+```text
+/var/www/wapt/waptagent.exe
+
+Size:   26649873 bytes
+SHA256: D37C03763A5D95A2EB3B8357CBD621564DE7305034674E9F1691E6311618D1DF
+Type:   PE32 GUI Intel 80386
+```
+
+It also generated and published:
+
+```text
+0790007d-waptupgrade_1.8.3.7444-1_all_d6d85fb20c8c3aa096571c619dbe3366.wapt
+
+SHA256:
+4DBA928B1973BDAEA7BC1929893BCB39F2BE05EC72F3B639CC5DA3072C58E432
+```
+
+The generated package is a valid WAPT/ZIP archive and contains:
+
+```text
+patchs/waptdeploy.exe
+setup.py
+WAPT/icon.png
+WAPT/wapt.psproj
+waptagent.exe
+waptagent.sha256
+WAPT/control
+WAPT/certificate.crt
+WAPT/manifest.sha256
+WAPT/signature.sha256
+```
+
+Important control metadata:
+
+```text
+package:            0790007d-waptupgrade
+version:            1.8.3.7444-1
+architecture:       all
+priority:           critical
+target_os:          windows
+min_wapt_version:   1.7
+signer:             0790007d
+signer_fingerprint: 1fd856f87e68b468839639287aa08e4413869c81d78e069cd6b1917cdd456734
+```
+
+Generation also updated the server repository `Packages` index.
+
+Result:
+
+```text
+agent generation:                  PASS
+server-side agent publication:     PASS
+historical-prefix waptupgrade:     PASS
+package signature material:        PRESENT
+repository index regeneration:     PASS
+```
+
+#### Authentic historical client upgrade 1.8.2.7393 -> 1.8.3.7444 — PASS
+
+A Windows test client was installed with the authentic historical WAPT
+1.8.2.7393 agent and pointed at the reconstructed server.
+
+Initial state:
+
+```text
+Wrapper Win32.exe : wapt-get 1.8.2.7393
+wapt-get.py 1.8.2
+common.py 1.8.2
+setuphelpers.py 1.8.2
+
+wapt-get.exe:
+FileVersion:    1.8.2.7393
+ProductVersion: 1.8.2
+
+WAPTService:
+Running / Automatic
+```
+
+The client used:
+
+```text
+repo_url=https://wapt-deb10.genevoix-signoret-vinci.fr.lan/wapt
+wapt_server=https://wapt-deb10.genevoix-signoret-vinci.fr.lan/
+```
+
+The package:
+
+```text
+0790007d-waptupgrade 1.8.3.7444-1
+```
+
+was assigned to the historical client and its installation was launched
+directly from the WAPT 1.8.3.7444 console.
+
+After deployment:
+
+```text
+Wrapper Win32.exe : wapt-get 1.8.3.7444
+wapt-get.py 1.8.3
+common.py 1.8.3
+setuphelpers.py 1.8.3
+
+wapt-get.exe:
+FileVersion:    1.8.3.7444
+ProductVersion: 1.8.3
+```
+
+During the upgrade, `WAPTService` entered a temporary stopped state while the
+agent was being replaced.
+
+NSSM events then showed the service being started automatically again.
+In this validation run, the observed stop/restart window was approximately
+80 seconds.
+
+Final state:
+
+```text
+WAPTService:
+Running / Automatic
+```
+
+The upgraded host subsequently reconnected to the WAPT console and the
+`0790007d-waptupgrade 1.8.3.7444-1` package was reported as successfully
+installed.
+
+No manual client-side `wapt-get upgrade` operation was used.
+
+Result:
+
+```text
+historical client 1.8.2.7393 -> 1.8.3.7444: PASS
+console-driven deployment:                       PASS
+automatic WAPTService recovery:                  PASS
+post-upgrade console reconnection:               PASS
+```
+
+#### Historical package-signing certificate continuity — PASS
+
+The historical client contained:
+
+```text
+C:\Program Files (x86)\wapt\ssl\0790007d-20181217-150755.crt
+```
+
+On the historical-client migration test, the certificate was already present
+before the `waptupgrade` installation.
+
+Its SHA256 is:
+
+```text
+D77E7E2157C1B595322342F01AB6A0B09CEF6A002E0638BB5ED8C1BC1011574A
+```
+
+The SHA256 of `WAPT/certificate.crt` embedded in the newly generated
+`0790007d-waptupgrade` is identical.
+
+This proves continuity between the historical client trust certificate and
+the certificate embedded in the newly generated 1.8.3 upgrade package.
+
+A separate clean-machine installation was then performed using the newly
+generated `waptagent.exe`.
+
+The downloaded agent hash was first verified:
+
+```text
+SHA256:
+D37C03763A5D95A2EB3B8357CBD621564DE7305034674E9F1691E6311618D1DF
+```
+
+After installation on the clean machine, the agent automatically created:
+
+```text
+C:\Program Files (x86)\wapt\ssl\0790007d-20181217-150755.crt
+```
+
+Observed timestamps:
+
+```text
+CreationTime:  2026-09-24 14:58:40
+LastWriteTime: 2026-09-24 14:35:00
+Size:          1285 bytes
+```
+
+The freshly installed certificate SHA256 was again:
+
+```text
+D77E7E2157C1B595322342F01AB6A0B09CEF6A002E0638BB5ED8C1BC1011574A
+```
+
+Therefore the newly generated 1.8.3.7444 agent provisions the historical
+`0790007d` trust certificate automatically on a clean Windows installation.
+
+Final result:
+
+```text
+historical certificate continuity:       PASS
+historical-client trust preservation:    PASS
+clean-install certificate provisioning:  PASS
+generated waptupgrade trust continuity:  PASS
+```
+
+The complete validated chain is now:
+
+```text
+consolidated Debian 10 WAPT 1.8.3 server
+        |
+        +-- validated 7444 setup/deploy publication
+        |
+        +-- WAPT console 1.8.3.7444
+        |
+        +-- historical package-signing identity 0790007d
+        |
+        +-- generated waptagent.exe 1.8.3.7444
+        |
+        +-- generated 0790007d-waptupgrade 1.8.3.7444-1
+        |
+        +-- clean Windows installation + historical certificate provisioning
+        |
+        +-- authentic 1.8.2.7393 client
+                |
+                +-- console-driven upgrade
+                +-- WAPTService automatic restart
+                +-- 1.8.3.7444 final state
+                +-- successful console reconnection
+```
+
+The consolidated Windows installation and historical-client upgrade path are
+therefore validated end-to-end.
+
+### 47.6 — Autonomous distribution cleanup — source review checkpoint (2026-09-24)
+
+Status: IN PROGRESS — source cleanup substantially complete; consolidated diff review, commit and rebuild still pending.
+
+The source review for implicit dependencies on obsolete/upstream WAPT / Tranquil infrastructure has been completed for the main runtime and installer paths.
+
+Validated changes already committed:
+- `2ee19e47e7` — Remove implicit upstream templates repository.
+- `a5e88dfd` — Remove upstream repository defaults from installers.
+
+Additional intentional changes currently remain uncommitted:
+
+- `waptconsole/uvisrepositories.lfm`
+  - neutralized external repository UI hints;
+  - removed stale design-time `C:\tranquilit\` path.
+
+- `wapt-get.ini.tmpl`
+  - removed/neutralized Tranquil/store repository examples and defaults;
+  - retained administrator-configurable external repository capability.
+
+- `waptconsole/uvisimportpackage.pas`
+  - removed dead commented fallback to `https://store.wapt.fr/wapt`.
+
+- `waptserver/server.py`
+  - removed external fallback downloads for `waptsetup.exe` and `waptdeploy.exe`;
+  - missing local artifacts now produce an empty URL instead of contacting upstream infrastructure.
+
+- `waptserver/templates/base.html`
+  - WAPTDeploy link is displayed only when a local artifact URL exists;
+  - removed the `TIS repository` link from the Repository menu;
+  - local `/store` repository remains available.
+
+- `waptserver/templates/index.html`
+  - WAPTDeploy download sections are displayed only when a local artifact URL exists.
+
+- Usage telemetry cleanup:
+  - `waptconsole/uwaptconsole.pas`
+    - `send_usage_report` default changed from `True` to `False`;
+    - reporting now additionally requires an explicitly configured `usage_report_url`;
+    - no default telemetry destination remains.
+  - `waptconsole/uviswaptconfig.pas`
+    - UI/config default for `send_usage_report` changed from `True` to `False`.
+  - `waptconsole/uwaptconsoleres.pas`
+    - removed obsolete `rsDefaultUsageStatsURL = 'http://wapt.tranquil.it/usage_stats'`.
+  - `waptconsole/uviswaptconfig.lfm`
+    - caption changed from `Send anonymous usage statistics to Tranquil IT`
+      to `Send anonymous usage statistics`.
+  - historical translation catalog (`.po`) entries have deliberately not yet been manually edited; inspect what the normal Lazarus build regenerates.
+
+- `waptsetup/wapt.iss`
+  - removed `AppUpdatesURL=https://wapt.tranquil.it/wapt/releases/latest`;
+  - publisher/support/contact metadata intentionally retained for now and deferred to future identity/branding work.
+
+Source review conclusions:
+- Historical copyright, attribution, doctest/example and documentation references to Tranquil/WAPT are not being globally removed.
+- Explicit historical attribution to WAPT/Tranquil may remain.
+- Functional routing toward current/upstream repositories or services must not be implicit.
+- External repositories remain supported when explicitly configured by the administrator.
+- Current TIS/WAPT repositories must not be presented as package sources for this fork because compatibility must not be assumed (notably the transitional Python 2 package/runtime model).
+- Remaining matches in `common.py`, `setuphelpers_windows.py`, `waptpackage.py`, `waptutils.py`, `waptsetup/create_setup.py`, and the documentation message in `waptsetup/wapt.iss` were classified as doctest/example/documentary references, not automatic runtime dependencies.
+- `waptservice/waptservice_common.py` and `wapt-get/waptwinutils.inc` Tranquil references inspected were historical paths/identifiers/examples, not external runtime destinations.
+
+EOL precautions remain mandatory:
+- do not normalize the repository;
+- do not use `git add .`;
+- preserve each file's existing EOL representation;
+- `waptconsole/uwaptconsole.pas` is historically `i/mixed w/mixed`;
+- `waptsetup/wapt.iss` is canonically LF after restore/edit and currently has only the intended `AppUpdatesURL` deletion.
+
+Exact next action:
+1. Perform one consolidated review of all intentional uncommitted §47.6 changes (`git status`, `git diff --check`, targeted/full diff).
+2. Verify no accidental EOL churn or unrelated modifications.
+3. Commit the validated autonomous-distribution cleanup using an explicit file list (never `git add .`).
+4. Rebuild the Windows product using the already validated build workflow.
+5. Inspect any PO/catalog changes produced by the normal Lazarus build before deciding whether to retain them.
+6. Perform focused runtime validation:
+   - clean installation has no implicit upstream repository;
+   - no automatic contact to Store/TIS/Tranquil during normal operation;
+   - generated agent/install remains functional;
+   - external repository functionality still works when explicitly configured by the administrator.
+7. Rebuild/update the Debian server package as required by the server source changes and perform only focused homepage/artifact-link regression tests.
+8. Update §47.6 and freeze the resulting consolidated 1.8.3 milestone before starting Debian 11.
+
+Do not reopen already closed DB migration, DR, historical 1.8.2.7393 -> 1.8.3.7444 migration, or Windows manifest/AuthentiCode investigations unless a new contradiction appears.
 
 ## 48. Resume protocol for the next ChatGPT thread
 
-Attach this checkpoint and send:
-
-```text
 Gipity, resume the WAPT project from the attached checkpoint.
 Treat WAPT_CHECKPOINT.md as the authoritative technical state.
 Do not repeat already validated investigations unless a contradiction appears.
@@ -5119,17 +5522,18 @@ The reconstructed tis-waptsetup 1.8.3.7445 package is validated and contains
 the exact validated Windows setup/deploy payload.
 
 The authentic historical database migration from db_version 1.8.2.1 to
-1.8.3.0 is PASS, including restart/idempotence, preservation of historical
-data, waptserver/wapttasks operation and local HTTPS.
+1.8.3.0 is PASS.
 
-Resume at section 47.5 "Exact next action".
+The consolidated Windows installation chain is also PASS:
+- setup/deploy publication integrity;
+- generated waptagent.exe 1.8.3.7444;
+- historical signing identity 0790007d;
+- generated 0790007d-waptupgrade 1.8.3.7444-1;
+- clean-machine agent installation and automatic historical certificate
+  provisioning;
+- authentic console-driven client migration 1.8.2.7393 -> 1.8.3.7444;
+- automatic WAPTService restart and successful console reconnection.
+
+Resume at section 47.6 "Exact next action".
+The next technical objective is autonomous-distribution validation.
 Short answers, one step at a time.
-```
-
-VM106 remains the authoritative checkpoint working tree:
-
-```text
-C:\git\waptdev\WAPT_CHECKPOINT.md
-```
-
-Do not accidentally commit historical/build residue and never use `git add .`.
