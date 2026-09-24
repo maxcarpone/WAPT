@@ -2,7 +2,7 @@
 param(
     [string]$SourceRoot,
     [string]$BuildKit = 'C:\wapt-build-kit',
-    [string]$Runtime = 'C:\wapt-runtime-1.8.3-script-test',
+    [string]$Runtime = 'C:\wapt-runtime-1.8.3',
     [string]$Output = 'C:\wapt-product-1.8.3',
     [string]$Worktree = 'C:\wapt-build-worktree-auto',
     [string]$Lazarus = 'C:\lazarus',

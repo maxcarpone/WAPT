@@ -4505,7 +4505,7 @@ generate final hashes/release manifest
 The temporary laboratory self-signed certificate remains a validation tool,
 not the final production distribution trust decision.
 
-### 46.4 Exact next Windows action
+### 46.4 Historical next action - completed by clean-VM proof
 
 Do not resume Windows build archaeology and do not rebuild the already
 validated artifact merely to retest the final `.Trim()` comparisons.
@@ -4546,6 +4546,255 @@ Sequence:
 
 Do not begin Debian 11 before the consolidated WAPT 1.8.3 release criteria are
 closed.
+
+### 46.5 Clean Windows VM proof — PASS (2026-09-24)
+
+The decisive clean-machine proof was performed on VM107 from the committed and
+pushed Windows automation state:
+
+```text
+branch: release/1.8.3
+commit: 0e4ae52804099bbd956573e380ea2e34227e7e30
+natural Git count: 7443
+target version: 1.8.3.7443
+```
+
+VM107 was rolled back to a clean internal-network reference image and the
+historical WAPT client was removed before validation.
+
+Initial development-tool baseline:
+
+```text
+Git:             ABSENT
+Python:          ABSENT
+Python 2:        ABSENT
+Lazarus:         ABSENT
+FPC:             ABSENT
+ISCC:            ABSENT
+VCForPython27:   ABSENT
+```
+
+The controlled build-kit was copied to:
+
+```text
+C:\wapt-build-kit
+```
+
+The principal controlled installers were verified against the previously
+recorded SHA256 values:
+
+```text
+Git 2.55.0.5 x64:
+D065A4E23C3D9A6B5073D609B5BE0830227EC3CA053C083BA385061DDFAF94C6
+
+Python 2.7.18 x86:
+D901802E90026E9BAD76B8A81F8DD7E43C7D7E8269D9281C9E9DF7A9C40480A9
+
+Lazarus 1.8.2 / FPC 3.0.4:
+B91517C673453F5AA355FFB3952E040433A8CDBBC5239BE72C869B60131B4166
+
+Inno Setup 5.6.0 Unicode:
+84A97B5820F83E7EB7258B69CC857C4F446DFB5C7C337C35E05A0CC304729346
+```
+
+The repository was freshly cloned and verified:
+
+```text
+HEAD:  0e4ae52804099bbd956573e380ea2e34227e7e30
+count: 7443
+```
+
+Git 2.55.0.windows.5, Python 2.7.18 x86, Lazarus 1.8.2 and FPC 3.0.4 were
+installed from the controlled build-kit.
+
+The clean-machine test exposed one previously implicit bootstrap dependency:
+a fresh CPython 2.7.18 installation does not contain `virtualenv`.
+
+VM106 reference state was:
+
+```text
+virtualenv: 15.1.0
+```
+
+The matching universal wheel was acquired and its SHA256 verified:
+
+```text
+virtualenv-15.1.0-py2.py3-none-any.whl
+SHA256:
+39D88B533B422825D644087A21E78C45CF5AF0EF7A99A1FC9FBB7B481E5C85B0
+```
+
+It was then installed into the bootstrap Python using only the local wheel.
+
+This dependency must be retained in the controlled build-kit and incorporated
+into the future Windows build-environment preparation procedure.
+
+PowerShell script execution also required a process-local execution-policy
+bypass on the clean VM. No persistent execution-policy modification was
+required.
+
+The autonomous runtime was then rebuilt successfully:
+
+```text
+WAPT 1.8.3 AUTONOMOUS RUNTIME: PASS
+OpenSSL 1.0.2u:                 PASS
+VCForPython27 installed:        NO
+```
+
+This establishes that the Microsoft Visual C++ Compiler Package for Python 2.7
+previously present on VM106 is not required to reconstruct the validated
+runtime from the controlled wheel set.
+
+The complete product build was then executed from the fresh clone using:
+
+```powershell
+& .\tools\build-windows-product.ps1 -Force
+```
+
+The complete automated pipeline reached its final validator successfully with
+no manual intervention during the product build.
+
+Final clean-machine setup:
+
+```text
+path:
+C:\wapt-product-1.8.3\waptsetup\waptsetup.exe
+
+FileVersion:    1.8.3.7443
+ProductVersion: 1.8.3.7443
+ProductName:    WAPTSetup
+size:           26655923 bytes
+SHA256:         D65796F9EF79348FE77E3CC60C0F7898D502596AF007C709CFEF4477A4FAB575
+Authenticode:   NotSigned
+```
+
+Final clean-machine result:
+
+```text
+autonomous runtime reconstruction:           PASS
+VCForPython27 independence:                  PASS
+complete automated product/setup build:      PASS
+Lazarus Community build:                     PASS
+controlled Inno Setup reconstruction:        PASS
+final VersionInfo validator:                 PASS
+fresh zero-to-exit-0 product run:             PASS
+unsigned-state verification:                 PASS
+clean Windows VM proof:                      PASS
+```
+
+The Windows reproducibility objective is therefore validated.
+
+### 46.6 Follow-up corrections revealed by the clean-VM proof
+
+Before freezing the final Windows build procedure:
+
+1. retain `virtualenv-15.1.0-py2.py3-none-any.whl` as a controlled build-kit
+   input and validate its SHA256;
+
+2. automate preparation of a clean Windows build environment, preferably with:
+
+   ```text
+   tools\prepare-windows-build-environment.ps1
+   ```
+
+   The procedure should validate controlled installer hashes, install the
+   required build prerequisites, install `virtualenv 15.1.0` offline and handle
+   the required process-local PowerShell execution policy;
+
+3. do not add VCForPython27 to the controlled prerequisites;
+
+4. remove the temporary validation naming
+   `C:\wapt-runtime-1.8.3-script-test` from the final procedure and replace it
+   with a neutral production path such as:
+
+   ```text
+   C:\wapt-runtime-1.8.3
+   ```
+
+5. Inno Setup does not need to be installed globally for the product build.
+   `build-windows-product.ps1` reconstructs and uses its controlled Inno tree
+   from the build-kit installer. The global Inno installation performed during
+   the VM107 investigation was therefore unnecessary and must not become a
+   documented prerequisite;
+
+6. keep signing as a separate explicit stage. The clean-machine artifact is
+   intentionally unsigned.
+
+After these cleanup items are implemented and validated, update the Windows
+build documentation and return to the consolidated WAPT 1.8.3 release
+validation sequence.
+
+#### Clean-VM bootstrap automation validation — PASS (2026-09-24)
+
+A dedicated Windows build-environment bootstrap script was added:
+
+```text
+tools\prepare-windows-build-environment.ps1
+```
+
+The script validates the controlled bootstrap inputs by SHA256 and installs or
+validates:
+
+```text
+Git:        2.55.0.windows.5
+Python:     2.7.18 x86
+virtualenv: 15.1.0
+Lazarus:    1.8.2
+FPC:        3.0.4
+```
+
+It intentionally does not install VCForPython27 or a global Inno Setup.
+
+Validation was performed in two stages:
+
+```text
+VM106 already-prepared environment / idempotence: PASS
+VM107 clean rollback / complete bootstrap:         PASS
+```
+
+On the clean VM107 test, Git, Python, virtualenv and Lazarus/FPC were installed
+and validated automatically from `C:\wapt-build-kit`.
+
+The controlled virtualenv bootstrap wheel is:
+
+```text
+C:\wapt-build-kit\python\virtualenv-15.1.0-py2.py3-none-any.whl
+size:   1820727 bytes
+SHA256: 39D88B533B422825D644087A21E78C45CF5AF0EF7A99A1FC9FBB7B481E5C85B0
+```
+
+After bootstrap, Git was immediately usable from the same PowerShell session:
+
+```text
+git version 2.55.0.windows.5
+```
+
+A fresh clone of `release/1.8.3` on VM107 then reproduced the expected source
+state:
+
+```text
+HEAD:  0e4ae52804099bbd956573e380ea2e34227e7e30
+count: 7443
+```
+
+The temporary default runtime path in `tools\build-windows-product.ps1` was
+also changed from:
+
+```text
+C:\wapt-runtime-1.8.3-script-test
+```
+
+to:
+
+```text
+C:\wapt-runtime-1.8.3
+```
+
+Historical checkpoint references to the former validation path are retained
+unchanged.
+
+At this point the clean Windows environment reconstruction procedure is
+automated and validated.
 
 ## 47. Resume protocol after automated Windows product-build milestone
 
